@@ -5,6 +5,6 @@
  * Leave these blank to use the original, fully offline-in-memory DEMO mode.
  */
 window.HOMEBOUND_CONFIG = {
-  SUPABASE_URL: '',
-  SUPABASE_PUBLISHABLE_KEY: ''
+  SUPABASE_URL: 'https://kiupwhmlsmnjcusfxawl.supabase.co',
+  SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_0J4PzmBwgsu_-42mPQ3ODQ_wBeP_rzq'
 };

@@ -1,47 +1,53 @@
-.glass-nav {
-            background: rgba(255, 255, 255, 0.85);
-            backdrop-filter: blur(12px);
-        }
-        .modal-backdrop {
-            background: rgba(15, 23, 42, 0.6);
-            backdrop-filter: blur(4px);
-        }
-        #map {
-            height: 380px;
-            border-radius: 1rem;
-            z-index: 1;
-        }
-        /* Custom scrollbar */
-        ::-webkit-scrollbar {
-            width: 6px;
-            height: 6px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #f1f5f9;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 3px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #94a3b8;
-        }
-
-/* Form controls for the landlord listing editor (Tailwind CDN remains for layout). */
-.input-editor {
-    display: block;
-    width: 100%;
-    margin-top: .35rem;
-    padding: .65rem .75rem;
-    border: 1px solid #cbd5e1;
-    border-radius: .65rem;
-    background: #fff;
-    color: #0f172a;
-    font-size: .8rem;
-    font-weight: 400;
+/* Homebound: retained appearance with compact search and improved landlord forms. */
+html { scroll-behavior: smooth; }
+.glass-nav { background: rgba(255,255,255,.94); backdrop-filter: blur(12px); }
+.site-header { position: sticky; top: 0; z-index: 40; flex-shrink: 0; }
+.modal-backdrop { background: rgba(15,23,42,.62); backdrop-filter: blur(4px); }
+#map { height: 340px; border-radius: 1rem; z-index: 1; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #f1f5f9; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+.input-editor { display:block; width:100%; margin-top:.35rem; padding:.65rem .75rem; border:1px solid #cbd5e1;
+    border-radius:.65rem; background:#fff; color:#0f172a; font-size:.8rem; font-weight:400; }
+.input-editor:focus { outline:2px solid #16a34a; outline-offset:1px; }
+.image-dropzone { padding:1rem; border:2px dashed #94a3b8; border-radius:1rem;
+    background:#f8fafc; color:#475569; text-align:center; transition:.2s border-color,.2s background; }
+.image-dropzone:hover, .image-dropzone:focus-within { border-color:#16a34a; background:#f0fdf4; }
+.image-file-input { max-width:100%; font-size:.75rem; color:#334155; }
+.image-file-input::file-selector-button { background:#166534; border:0; border-radius:.5rem; color:white; padding:.4rem .65rem; margin-right:.5rem; cursor:pointer; }
+.price-no-spinner::-webkit-inner-spin-button, .price-no-spinner::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
+.price-no-spinner { -moz-appearance:textfield; appearance:textfield; }
+.analytics-panel { padding:1rem; border:1px solid #e2e8f0; border-radius:.9rem; background:#fff; break-inside:avoid; }
+.analytics-panel h4 { font-weight:750; color:#0f172a; font-size:.9rem; }
+.analytics-panel > p { font-size:.74rem; color:#64748b; margin-bottom:.75rem; }
+#liveChatDrawer { max-width:calc(100vw - 24px); }
+#liveChatMessages { overscroll-behavior:contain; }
+@media (min-width:900px) {
+    #modalBedspaceViewer.chat-side-open { justify-content:flex-end; padding-left:350px; }
+    #modalBedspaceViewer.chat-side-open .room-preview-dialog { max-width:min(900px,calc(100vw - 390px)); margin-right:8px; }
 }
-.input-editor:focus { outline: 2px solid #16a34a; outline-offset: 1px; }
+@media (max-width:640px) {
+    .homebound-hero { padding:1rem; }
+    #liveChatDrawer { left:12px; right:12px; width:auto; bottom:8px; height:280px !important; }
+    #modalBedspaceViewer.chat-side-open .room-preview-dialog { margin-top:0; transform:translateY(-70px); max-height:64vh; }
+    #activeHoldBanner { max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+}
+@page { size:A4; margin:14mm; }
 @media print {
-    header, #studentPortalView, #toastContainer, #liveChatDrawer, #aiAssistantWindow, #modalListingEditor { display: none !important; }
-    #ownerPortalView, #tabContentAnalytics { display: block !important; }
+    html,body { background:white !important; color:#000 !important; height:auto !important; margin:0 !important; display:block !important; }
+    body * { visibility:hidden !important; }
+    #tabContentAnalytics,#tabContentAnalytics * { visibility:visible !important; }
+    #tabContentAnalytics { display:block !important; position:absolute !important; top:0 !important; left:0 !important;
+        width:100% !important; margin:0 !important; padding:0 !important; overflow:visible !important; }
+    .print-hide { display:none !important; }
+    .analytics-report { font-family:Arial,Helvetica,sans-serif !important; }
+    .analytics-report > div { break-inside:avoid; }
+    .analytics-panel { border:1px solid #bbb !important; margin-bottom:4mm; break-inside:avoid; }
+    #analyticsKpis { gap:2mm !important; }
+    #analyticsKpis > div { border:1px solid #ccc !important; }
+    .analytics-panel canvas { max-height:170px !important; }
+    #analyticsRecommendations > div { border:1px solid #ddd !important; }
+    #ownerPortalView { padding:0 !important; margin:0 !important; }
+    canvas { print-color-adjust:exact; -webkit-print-color-adjust:exact; }
 }
