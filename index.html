@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Homebound - Listing Management</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Leaflet CSS & JS for Interactive Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Chart.js for Admin Analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <script src="js/tailwind-config.js"></script>
+
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="h-full flex flex-col font-sans text-slate-800 antialiased selection:bg-brand-500 selection:text-white">
+
+<!-- Header Navbar -->
+<header class="sticky top-0 z-40 glass-nav border-b border-slate-200/80 shadow-sm transition-all duration-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        
+        <!-- Logo -->
+        <div class="flex items-center space-x-3 cursor-pointer" onclick="switchPortal('student')">
+            <div class="bg-brand-600 text-white p-2.5 rounded-xl shadow-md shadow-brand-500/20 flex items-center justify-center">
+                <i class="fa-solid fa-building-user text-xl"></i>
+            </div>
+            <div>
+                <span class="text-xl font-bold tracking-tight text-slate-900">Home<span class="text-brand-600">bound</span></span>
+                <span class="block text-[10px] font-semibold text-slate-400 tracking-wider uppercase -mt-1">Rental Information Hub</span>
+            </div>
+        </div>
+
+        <!-- Data connection indicator -->
+        <div id="connectionStatus" class="hidden sm:block text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-2 py-1">Demo mode</div>
+
+        <!-- Role Portal Switcher Badge -->
+        <div class="flex items-center space-x-3">
+            <!-- Active Hold Alert Notification Pill (Visible if student has active hold) -->
+            <div id="activeHoldBanner" class="hidden items-center bg-amber-50 text-amber-800 border border-amber-200 text-xs px-3 py-1.5 rounded-full shadow-sm animate-pulse">
+                <i class="fa-solid fa-clock text-amber-600 mr-2"></i>
+                <span class="font-medium">Demo Hold: <strong id="holdDormName" class="font-semibold">Listing</strong></span>
+                <button onclick="openHoldStatusModal()" class="ml-2 underline font-bold hover:text-amber-900">Manage</button>
+            </div>
+
+            <!-- Switcher Buttons -->
+            <div class="bg-slate-100 p-1 rounded-xl border border-slate-200 flex items-center">
+                <button id="btnPortalStudent" onclick="switchPortal('student')" 
+                    class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 flex items-center space-x-1.5 bg-white text-slate-900 shadow-sm">
+                    <i class="fa-solid fa-graduation-cap"></i>
+                    <span>Student Portal</span>
+                </button>
+                <button id="btnPortalOwner" onclick="attemptOwnerLogin()" 
+                    class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:text-slate-900 transition-all duration-150 flex items-center space-x-1.5">
+                    <i class="fa-solid fa-user-shield"></i>
+                    <span>Owner / Admin UI</span>
+                </button>
+            </div>
+        </div>
+
+    </div>
+</header>
+
+<!-- Toast Container -->
+<div id="toastContainer" class="fixed top-20 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+<!-- STUDENT PORTAL MAIN VIEW -->
+<main id="studentPortalView" class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- Hero Banner with Quick Filters -->
+    <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
+        <div class="absolute -right-10 -bottom-10 w-64 h-64 bg-brand-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        
+        <div class="max-w-2xl relative z-10 space-y-3">
+            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-brand-500/20 text-brand-300 border border-brand-500/30">
+                <i class="fa-solid fa-shield-check mr-1.5 text-xs"></i> Verified Campus Accommodations
+            </span>
+            <h1 class="text-2xl sm:text-4xl font-extrabold tracking-tight">Find verified dorms & bedspaces near your campus.</h1>
+            <p class="text-slate-300 text-sm sm:text-base">Compare prices, inspect exact room layouts, check live availability, and reserve directly with zero hassle.</p>
+        </div>
+
+        <!-- Search & Filter Controls Container -->
+        <div class="mt-6 bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/20 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            
+            <!-- Location Search -->
+            <div>
+                <label class="block text-xs font-medium text-slate-300 mb-1"><i class="fa-solid fa-location-dot text-brand-400 mr-1"></i> Campus Location</label>
+                <select id="filterLocation" onchange="applyFilters()" class="w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg text-xs px-3 py-2.5 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                    <option value="ALL">All University Belt Zones</option>
+                    <option value="Main Campus Gate 1">Main Campus - Gate 1 Zone</option>
+                    <option value="North Campus Area">North Campus / Science Complex</option>
+                    <option value="East University Avenue">East University Avenue</option>
+                    <option value="East University Belt">East University Belt</option>
+                    <option value="West Student Village">West Student Village</option>
+                </select>
+            </div>
+
+            <!-- Price Range Dropdown -->
+            <div>
+                <label class="block text-xs font-medium text-slate-300 mb-1"><i class="fa-solid fa-tag text-brand-400 mr-1"></i> Monthly Budget Range</label>
+                <select id="filterPriceRange" onchange="applyFilters()" class="w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg text-xs px-3 py-2.5 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                    <option value="ALL">Any Budget Range</option>
+                    <option value="0-3000">₱1,500 - ₱3,000 / month</option>
+                    <option value="3000-5000">₱3,000 - ₱5,000 / month</option>
+                    <option value="5000-10000">₱5,000 - ₱10,000 / month</option>
+                </select>
+            </div>
+
+            <!-- Property Type -->
+            <div>
+                <label class="block text-xs font-medium text-slate-300 mb-1"><i class="fa-solid fa-house text-brand-400 mr-1"></i> Accommodation Type</label>
+                <select id="filterType" onchange="applyFilters()" class="w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg text-xs px-3 py-2.5 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                    <option value="ALL">All Property Types</option>
+                    <option value="Dormitory">Dormitory</option>
+                    <option value="Bedspace">Bedspace</option>
+                    <option value="Apartment">Studio / Apartment</option>
+                </select>
+            </div>
+
+            <!-- Filter by amenities of any room -->
+            <div>
+                <label class="block text-xs font-medium text-slate-300 mb-1">Room Amenities</label>
+                <select id="filterAmenity" onchange="applyFilters()" class="w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg text-xs px-3 py-2.5">
+                    <option value="ALL">All Amenities</option>
+                    <option value="wifi">Wi-Fi / Internet</option>
+                    <option value="aircon">Air Conditioning</option>
+                    <option value="study">Study Area</option>
+                    <option value="bathroom">Private Bathroom</option>
+                    <option value="security">Security / CCTV</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-300 mb-1">Availability</label>
+                <select id="filterAvailability" onchange="applyFilters()" class="w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg text-xs px-3 py-2.5">
+                    <option value="ALL">Any Availability</option>
+                    <option value="Available">Has Available Rooms</option>
+                    <option value="Full">Fully Occupied</option>
+                </select>
+            </div>
+
+            <!-- Reset / Search Action Button -->
+            <div class="flex items-end space-x-2">
+                <button onclick="resetFilters()" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded-lg text-xs font-semibold py-2.5 transition">
+                    <i class="fa-solid fa-rotate-left mr-1"></i> Reset
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Map & Toggle Section -->
+    <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm space-y-3">
+        <div class="flex items-center justify-between">
+            <h2 class="text-sm font-bold uppercase tracking-wider text-slate-500 flex items-center">
+                <i class="fa-solid fa-map-location-dot text-brand-600 mr-2"></i> Live University Belt Campus Map
+            </h2>
+            <span class="text-xs text-slate-400">Click pins to highlight listings</span>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <!-- Listings Grid Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h2 class="text-xl font-bold text-slate-900">Available Dorms & Bedspaces</h2>
+            <p class="text-xs text-slate-500"><span id="listingSourceText">Demo sample listings. Connect Supabase for live owner updates.</span></p>
+        </div>
+        <div class="text-xs text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full font-medium">
+            Found <span id="listingCount" class="font-bold text-slate-900">0</span> properties matching criteria
+        </div>
+    </div>
+
+    <!-- Listings Container -->
+    <div id="listingsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <!-- Rendered via JavaScript -->
+    </div>
+
+</main>
+
+<!-- OWNER / ADMIN PORTAL VIEW (Hidden by default) -->
+<main id="ownerPortalView" class="hidden flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    
+    <!-- Admin Top Header Banner -->
+    <div class="bg-slate-900 text-white rounded-2xl p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+            <div class="flex items-center space-x-2 text-brand-400 text-xs font-bold uppercase tracking-wider mb-1">
+                <span class="w-2 h-2 rounded-full bg-brand-500 animate-ping"></span>
+                <span>Owner Centralized Management Dashboard</span>
+            </div>
+            <h1 class="text-2xl font-bold">University Belt Landlord Portal</h1>
+            <p class="text-xs text-slate-400">Manage property listings. Visitations, rental payments, SMS and charts are demo-only until separately integrated.</p>
+        </div>
+        
+        <div class="flex items-center space-x-3">
+            <button onclick="openNewListingModal()" class="bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition flex items-center shadow-lg shadow-brand-600/30">
+                <i class="fa-solid fa-plus mr-2"></i> Add New Unit/Listing
+            </button>
+            <button id="ownerLogoutButton" onclick="logoutOwner()" class="hidden bg-rose-800 hover:bg-rose-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl border border-rose-700 transition">Sign Out</button>
+            <button onclick="switchPortal('student')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-4 py-2.5 rounded-xl border border-slate-700 transition">
+                <i class="fa-solid fa-right-from-bracket mr-1.5"></i> Exit Portal
+            </button>
+        </div>
+    </div>
+
+    <!-- Overview Stat Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+                <span class="text-xs font-semibold text-slate-400 uppercase">Total Occupancy</span>
+                <p class="text-2xl font-black text-slate-900" id="statOccupancy">88%</p>
+                <span class="text-[10px] text-brand-600 font-semibold"><i class="fa-solid fa-arrow-up mr-1"></i>+4% this sem</span>
+            </div>
+            <div class="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center text-brand-600 font-bold">
+                <i class="fa-solid fa-bed text-lg"></i>
+            </div>
+        </div>
+
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+                <span class="text-xs font-semibold text-slate-400 uppercase">Monthly Revenue</span>
+                <p class="text-2xl font-black text-slate-900" id="statRevenue">₱184,000</p>
+                <span class="text-[10px] text-slate-400">Projected yield</span>
+            </div>
+            <div class="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 font-bold">
+                <i class="fa-solid fa-peso-sign text-lg"></i>
+            </div>
+        </div>
+
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+                <span class="text-xs font-semibold text-slate-400 uppercase">Pending Visits</span>
+                <p class="text-2xl font-black text-amber-600" id="statPendingVisits">3</p>
+                <span class="text-[10px] font-semibold text-amber-600">Requires review</span>
+            </div>
+            <div class="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 font-bold">
+                <i class="fa-solid fa-calendar-day text-lg"></i>
+            </div>
+        </div>
+
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+                <span class="text-xs font-semibold text-slate-400 uppercase">Active Holds</span>
+                <p class="text-2xl font-black text-blue-600" id="statActiveHolds">2</p>
+                <span class="text-[10px] text-slate-400">Demo hold requests</span>
+            </div>
+            <div class="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 font-bold">
+                <i class="fa-solid fa-hand-holding-hand text-lg"></i>
+            </div>
+        </div>
+
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+                <span class="text-xs font-semibold text-slate-400 uppercase">Overdue Payments</span>
+                <p class="text-2xl font-black text-rose-600" id="statOverdueCount">2</p>
+                <span class="text-[10px] text-rose-500 font-semibold">Reminders pending</span>
+            </div>
+            <div class="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600 font-bold">
+                <i class="fa-solid fa-bell text-lg"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Tabs Container -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        
+        <!-- Tab Navigation Bar -->
+        <div class="flex border-b border-slate-200 overflow-x-auto bg-slate-50/50">
+            <button onclick="switchAdminTab('visitations')" id="tabBtnVisitations" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-brand-600 text-brand-600 flex items-center space-x-2 whitespace-nowrap">
+                <i class="fa-solid fa-clipboard-list"></i>
+                <span>Visitations & Hold Requests</span>
+                <span id="badgeVisitCount" class="bg-brand-100 text-brand-800 text-[10px] px-2 py-0.5 rounded-full font-extrabold">3</span>
+            </button>
+            <button onclick="switchAdminTab('payments')" id="tabBtnPayments" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap">
+                <i class="fa-solid fa-receipt"></i>
+                <span>Payment Tracker & SMS Alerts</span>
+                <span id="badgeOverdueCount" class="bg-rose-100 text-rose-800 text-[10px] px-2 py-0.5 rounded-full font-extrabold">2</span>
+            </button>
+            <button onclick="switchAdminTab('listings')" id="tabBtnListings" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap">
+                <i class="fa-solid fa-list-check"></i>
+                <span>My Property Listings</span>
+            </button>
+            <button onclick="switchAdminTab('analytics')" id="tabBtnAnalytics" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap">
+                <i class="fa-solid fa-chart-line"></i>
+                <span>Seasonal Influx & Analytics</span>
+            </button>
+        </div>
+
+        <!-- Tab 1: Visitations & Holds -->
+        <div id="tabContentVisitations" class="p-6 space-y-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="font-bold text-slate-900 text-base">Incoming Student Visitation & Hold Requests</h3>
+                    <p class="text-xs text-slate-500">Prototype requests in this browser session only; not stored or sent to landlords.</p>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs border-collapse">
+                    <thead>
+                        <tr class="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider">
+                            <th class="p-3 rounded-l-lg">Student Info</th>
+                            <th class="p-3">Target Unit / Room</th>
+                            <th class="p-3">Requested Date & Slot</th>
+                            <th class="p-3">Contact No.</th>
+                            <th class="p-3">Status</th>
+                            <th class="p-3 rounded-r-lg text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="adminVisitationsTable" class="divide-y divide-slate-200 text-slate-700">
+                        <!-- Javascript Populated -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Tab 2: Payment Tracker & SMS Reminders -->
+        <div id="tabContentPayments" class="hidden p-6 space-y-4">
+            <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start space-x-3 text-xs text-blue-900">
+                <i class="fa-solid fa-circle-info text-blue-600 text-base mt-0.5"></i>
+                <div>
+                    <strong class="font-semibold block">Non-Transaction Payment Monitor:</strong>
+                    <span>This platform monitors monthly rental due dates and tenant payment statuses. No financial transactions or SMS are sent here. The button previews a sample payment notice; connect an SMS provider separately to send actual messages.</span>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs border-collapse">
+                    <thead>
+                        <tr class="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider">
+                            <th class="p-3 rounded-l-lg">Tenant Name</th>
+                            <th class="p-3">Assigned Unit</th>
+                            <th class="p-3">Monthly Due</th>
+                            <th class="p-3">Due Date</th>
+                            <th class="p-3">Status</th>
+                            <th class="p-3 rounded-r-lg text-right">SMS Reminders & Status Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="adminPaymentsTable" class="divide-y divide-slate-200 text-slate-700">
+                        <!-- JavaScript Populated -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Tab 3: Listing Management -->
+        <div id="tabContentListings" class="hidden p-6 space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="font-bold text-slate-900 text-base">Active Property Inventory</h3>
+                <span class="text-xs text-slate-500">Live toggles immediately update availability on student searches</span>
+            </div>
+            <div id="adminListingsContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <!-- Javascript Populated -->
+            </div>
+        </div>
+
+        <!-- Tab 4: Automated Seasonal Report & Analytics -->
+        <div id="tabContentAnalytics" class="hidden p-6 space-y-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+                <div>
+                    <h3 class="font-bold text-slate-900 text-base">Automated Seasonal Student Influx & Occupancy Report</h3>
+                    <p class="text-xs text-slate-500">Illustrative sample chart data, not live Supabase analytics</p>
+                </div>
+                <button onclick="printAnalyticsReport()" class="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center space-x-2 transition self-start sm:self-auto">
+                    <i class="fa-solid fa-print"></i>
+                    <span>Generate & Print Report</span>
+                </button>
+            </div>
+
+            <!-- Charts Grid -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Seasonal Influx Chart -->
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                    <h4 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Student Intake by Academic Term (Seasonal Influx)</h4>
+                    <div class="h-64 relative">
+                        <canvas id="chartSeasonalInflux"></canvas>
+                    </div>
+                </div>
+
+                <!-- Room Type Preference Chart -->
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                    <h4 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Occupancy Share by Accommodation Type</h4>
+                    <div class="h-64 relative">
+                        <canvas id="chartRoomShare"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Summary Text Insights Box -->
+            <div class="bg-brand-50 border border-brand-200 rounded-xl p-4 text-xs text-brand-900 space-y-2">
+                <div class="flex items-center font-bold text-brand-800 text-sm">
+                    <i class="fa-solid fa-lightbulb text-brand-600 mr-2"></i> Automated Capstone Seasonal Insights
+                </div>
+                <p>• <strong>Peak Intake Window:</strong> Illustrative dataset: highest modeled influx is in <strong>August-September (Sem 1 Start)</strong> with 72% of total yearly inquiries, followed by a secondary surge in <strong>January (Sem 2)</strong>.</p>
+                <p>• <strong>Demanded Amenity:</strong> Properties offering air-conditioning and study hubs experience 3x faster booking rates.</p>
+            </div>
+        </div>
+
+    </div>
+
+</main>
+
+<!-- FLOATING AI ASSISTANT WIDGET -->
+<div class="fixed bottom-5 right-5 z-40">
+    <!-- AI Chat Trigger Button -->
+    <button onclick="toggleAIChat()" class="bg-brand-600 hover:bg-brand-700 text-white p-4 rounded-full shadow-2xl shadow-brand-600/50 flex items-center justify-center transition-transform hover:scale-110 relative group">
+        <i class="fa-solid fa-robot text-2xl"></i>
+        <span class="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-3.5 w-3.5 bg-brand-500 border-2 border-white"></span>
+        </span>
+        <!-- Hover Tooltip -->
+        <span class="absolute right-16 bg-slate-900 text-white text-[11px] font-bold py-1 px-3 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none shadow-lg">
+            Dorm Unit Assistant
+        </span>
+    </button>
+
+    <!-- AI Floating Window -->
+    <div id="aiAssistantWindow" class="hidden fixed bottom-20 right-5 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col z-50 transition-all transform duration-200" style="height: 480px;">
+        
+        <!-- Header -->
+        <div class="bg-slate-900 p-3.5 text-white flex items-center justify-between border-b border-slate-800">
+            <div class="flex items-center space-x-2.5">
+                <div class="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold text-sm">
+                    <i class="fa-solid fa-robot"></i>
+                </div>
+                <div>
+                    <h4 class="text-xs font-bold leading-tight">Homebound Dorm Assistant</h4>
+                    <span class="text-[10px] text-brand-400 flex items-center">
+                        <span class="w-1.5 h-1.5 rounded-full bg-brand-400 mr-1"></span> Local Rule-Based Suggester
+                    </span>
+                </div>
+            </div>
+            <button onclick="toggleAIChat()" class="text-slate-400 hover:text-white transition">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+        </div>
+
+        <!-- Chat Messages Body -->
+        <div id="aiChatBody" class="flex-1 p-3.5 overflow-y-auto space-y-3 bg-slate-50 text-xs">
+            <!-- Initial AI Greeting -->
+            <div class="flex items-start space-x-2">
+                <div class="w-6 h-6 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-[10px] shrink-0">AI</div>
+                <div class="bg-white p-3 rounded-2xl rounded-tl-none border border-slate-200 shadow-sm text-slate-700 space-y-2">
+                    <p>Hi student! 👋 I can help you find the best dorm or bedspace near your campus.</p>
+                    <p class="font-semibold text-slate-800">What is your primary priority?</p>
+                    
+                    <!-- Quick Prompt Buttons -->
+                    <div class="flex flex-col space-y-1.5 pt-1">
+                        <button onclick="sendAIPrompt('Under ₱3,000 budget')" class="bg-slate-100 hover:bg-brand-50 hover:text-brand-700 text-left px-2.5 py-1.5 rounded-lg border border-slate-200 transition text-[11px]">
+                            💰 Low Budget (Under ₱3,000)
+                        </button>
+                        <button onclick="sendAIPrompt('Nearest to Gate 1')" class="bg-slate-100 hover:bg-brand-50 hover:text-brand-700 text-left px-2.5 py-1.5 rounded-lg border border-slate-200 transition text-[11px]">
+                            📍 Walking distance to Gate 1
+                        </button>
+                        <button onclick="sendAIPrompt('With Aircon and Wifi')" class="bg-slate-100 hover:bg-brand-50 hover:text-brand-700 text-left px-2.5 py-1.5 rounded-lg border border-slate-200 transition text-[11px]">
+                            ⚡ Aircon & Study Rooms
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat Input Field -->
+        <div class="p-2.5 bg-white border-t border-slate-200 flex items-center space-x-2">
+            <input type="text" id="aiInput" onkeypress="if(event.key==='Enter') sendCustomAIPrompt()" placeholder="Ask AI: e.g. 'Looking for ₱4000 near gate 1'..." class="flex-1 text-xs border border-slate-300 rounded-xl px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+            <button onclick="sendCustomAIPrompt()" class="bg-brand-600 hover:bg-brand-700 text-white p-2 rounded-xl transition">
+                <i class="fa-solid fa-paper-plane text-xs"></i>
+            </button>
+        </div>
+
+    </div>
+</div>
+
+<!-- INTEGRATED LIVE CHAT DRAWER WITH OWNER -->
+<div id="liveChatDrawer" class="hidden fixed bottom-5 left-5 z-40 w-80 sm:w-88 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col transition-all duration-200" style="height: 420px;">
+    <!-- Chat Drawer Header -->
+    <div class="bg-slate-900 text-white p-3.5 flex items-center justify-between">
+        <div class="flex items-center space-x-2.5">
+            <div id="chatOwnerAvatar" class="w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center font-bold text-xs text-white">
+                O
+            </div>
+            <div>
+                <h4 id="chatOwnerTitle" class="text-xs font-bold leading-tight">Owner Inquiry Chat</h4>
+                <span class="text-[10px] text-brand-400">Simulated Chat (Demo)</span>
+            </div>
+        </div>
+        <button onclick="closeLiveChat()" class="text-slate-400 hover:text-white">
+            <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+    </div>
+
+    <!-- Message Area -->
+    <div id="liveChatMessages" class="flex-1 p-3 overflow-y-auto space-y-2 bg-slate-50 text-xs">
+        <div class="text-center text-[10px] text-slate-400 my-2">Demo chat session • Messages are not sent to a real landlord</div>
+    </div>
+
+    <!-- Quick Inquiry Suggestions -->
+    <div class="px-2 py-1 bg-slate-100 border-t border-slate-200 flex space-x-1 overflow-x-auto text-[10px]">
+        <button onclick="sendQuickMessage('Is this listing still available?')" class="bg-white border border-slate-300 px-2 py-1 rounded-md text-slate-700 whitespace-nowrap hover:bg-slate-50">Is it available?</button>
+        <button onclick="sendQuickMessage('Can I schedule a visitation tomorrow?')" class="bg-white border border-slate-300 px-2 py-1 rounded-md text-slate-700 whitespace-nowrap hover:bg-slate-50">Schedule Visit?</button>
+        <button onclick="sendQuickMessage('What are the payment terms?')" class="bg-white border border-slate-300 px-2 py-1 rounded-md text-slate-700 whitespace-nowrap hover:bg-slate-50">Payment terms?</button>
+    </div>
+
+    <!-- Input -->
+    <div class="p-2 bg-white border-t border-slate-200 flex items-center space-x-2">
+        <input type="text" id="liveChatInput" onkeypress="if(event.key==='Enter') sendLiveChatMessage()" placeholder="Type a message to the owner..." class="flex-1 text-xs border border-slate-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500">
+        <button onclick="sendLiveChatMessage()" class="bg-brand-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-brand-700 transition">Send</button>
+    </div>
+</div>
+
+<!-- MODAL 1: BEDSPACE GRANULARITY VIEWER (Specific Room & Images) -->
+<div id="modalBedspaceViewer" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop overflow-y-auto">
+    <div class="bg-white rounded-2xl max-w-4xl w-full overflow-hidden shadow-2xl border border-slate-200 my-8 flex flex-col max-h-[90vh]">
+        
+        <!-- Modal Header -->
+        <div class="bg-slate-900 text-white p-4 flex items-center justify-between shrink-0">
+            <div>
+                <h3 id="modalDormTitle" class="text-lg font-bold">Dorm Title</h3>
+                <p id="modalDormSub" class="text-xs text-slate-400">Detailed Room & Bedspace Granularity Breakdown</p>
+            </div>
+            <button onclick="closeModal('modalBedspaceViewer')" class="text-slate-400 hover:text-white p-1">
+                <i class="fa-solid fa-xmark text-xl"></i>
+            </button>
+        </div>
+
+        <!-- Modal Scrollable Content -->
+        <div class="p-6 overflow-y-auto space-y-6 flex-1 text-xs text-slate-700">
+            
+            <!-- Room Image & Details Showcase Header -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-center bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <!-- Selected Room Specific Image Gallery -->
+                <div class="space-y-2">
+                    <div class="relative h-56 rounded-xl overflow-hidden shadow-sm">
+                        <img id="roomActiveImage" src="" alt="Room preview" class="w-full h-full object-cover">
+                        <span id="roomImageBadge" class="absolute top-2 left-2 bg-slate-900/80 text-white text-[10px] font-bold px-2 py-1 rounded-md backdrop-blur-sm">
+                            Room Image Preview
+                        </span>
+                    </div>
+                    <!-- Room Thumbnail Gallery Switcher -->
+                    <div id="roomThumbnails" class="flex space-x-2 overflow-x-auto py-1">
+                        <!-- JS populated -->
+                    </div>
+                </div>
+
+                <!-- Room Specifications -->
+                <div class="space-y-3">
+                    <span id="modalRoomTypeTag" class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-brand-100 text-brand-800 uppercase">
+                        Studio / Bedspace
+                    </span>
+                    <h4 id="modalRoomName" class="text-xl font-bold text-slate-900">Room 101 - Aircon Quad Sharing</h4>
+                    <p id="modalRoomDesc" class="text-slate-600 leading-relaxed">Spacious room equipped with individual study desks, personal locker closets, and private toilet & bath.</p>
+                    
+                    <div class="grid grid-cols-2 gap-2 text-slate-600 pt-2 border-t border-slate-200">
+                        <div><strong class="text-slate-900">Price:</strong> <span id="modalRoomPrice" class="text-brand-700 font-bold">₱2,500/mo</span></div>
+                        <div><strong class="text-slate-900">Capacity:</strong> <span id="modalRoomCap">4 Bedspaces</span></div>
+                        <div><strong class="text-slate-900">Curfew:</strong> 10:00 PM Gate Lock</div>
+                        <div><strong class="text-slate-900">Utility Billing:</strong> Sub-metered</div>
+                    </div>
+
+                    <div class="pt-2">
+                        <span class="block text-[11px] font-bold text-slate-900 mb-1">Included Amenities:</span>
+                        <div id="modalRoomAmenities" class="flex flex-wrap gap-1">
+                            <!-- Populated JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Room Selector Tabs (Bedspace Granularity) -->
+            <div class="space-y-3">
+                <h4 class="font-bold text-slate-900 text-sm">Select Room Layout / Specific Bedspace:</h4>
+                <div id="roomSelectorList" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <!-- Populated dynamically per dorm -->
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Modal Footer Actions -->
+        <div class="bg-slate-50 p-4 border-t border-slate-200 flex items-center justify-between shrink-0">
+            <button onclick="openChatFromModal()" class="text-slate-700 hover:text-slate-900 text-xs font-semibold flex items-center space-x-1 px-3 py-2 border border-slate-300 rounded-lg bg-white">
+                <i class="fa-solid fa-comments text-brand-600"></i>
+                <span>Ask Owner A Question</span>
+            </button>
+            <div class="flex space-x-2">
+                <button onclick="closeModal('modalBedspaceViewer')" class="px-4 py-2 border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-100">Close</button>
+                <button onclick="openPreHoldForm()" class="px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-brand-600/30 flex items-center space-x-1">
+                    <i class="fa-solid fa-calendar-check mr-1"></i>
+                    <span>Fill Info & Hold 24h</span>
+                </button>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- MODAL 2: PRE-HOLD & VISITATION FILL-OUT FORM -->
+<div id="modalPreHoldForm" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop overflow-y-auto">
+    <div class="bg-white rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-200 my-8">
+        
+        <div class="bg-slate-900 text-white p-4 flex items-center justify-between">
+            <div>
+                <h3 class="text-base font-bold">Schedule Visit & Request 24h Hold</h3>
+                <p class="text-xs text-slate-400">Provide your information for owner confirmation</p>
+            </div>
+            <button onclick="closeModal('modalPreHoldForm')" class="text-slate-400 hover:text-white">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+        </div>
+
+        <form onsubmit="submitHoldRequest(event)" class="p-6 space-y-4 text-xs">
+            <div>
+                <label class="block font-bold text-slate-700 mb-1">Full Student Name *</label>
+                <input type="text" id="holdStudentName" required placeholder="e.g. Juan De La Cruz" class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">Mobile Phone Number *</label>
+                    <input type="tel" id="holdStudentPhone" required placeholder="0917XXXXXXX" class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">Student Email *</label>
+                    <input type="email" id="holdStudentEmail" required placeholder="juan@univ.edu.ph" class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                </div>
+            </div>
+
+            <div>
+                <label class="block font-bold text-slate-700 mb-1">Target Visitation Date *</label>
+                <input type="date" id="holdVisitDate" required class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+            </div>
+
+            <div>
+                <label class="block font-bold text-slate-700 mb-1">Available Visitation Time Slots *</label>
+                <div class="grid grid-cols-3 gap-2 pt-1">
+                    <label class="border border-slate-200 rounded-lg p-2 text-center cursor-pointer hover:border-brand-500 flex flex-col items-center">
+                        <input type="radio" name="visitSlot" value="10:00 AM" checked class="accent-brand-600 mb-1">
+                        <span class="font-bold text-slate-800">10:00 AM</span>
+                        <span class="text-[9px] text-brand-600 font-semibold">2 Slots Left</span>
+                    </label>
+                    <label class="border border-slate-200 rounded-lg p-2 text-center cursor-pointer hover:border-brand-500 flex flex-col items-center">
+                        <input type="radio" name="visitSlot" value="02:00 PM" class="accent-brand-600 mb-1">
+                        <span class="font-bold text-slate-800">02:00 PM</span>
+                        <span class="text-[9px] text-brand-600 font-semibold">1 Slot Left</span>
+                    </label>
+                    <label class="border border-slate-200 rounded-lg p-2 text-center cursor-pointer hover:border-brand-500 flex flex-col items-center">
+                        <input type="radio" name="visitSlot" value="04:30 PM" class="accent-brand-600 mb-1">
+                        <span class="font-bold text-slate-800">04:30 PM</span>
+                        <span class="text-[9px] text-brand-600 font-semibold">3 Slots Left</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-[11px] space-y-1">
+                <span class="font-bold flex items-center"><i class="fa-solid fa-circle-info mr-1.5 text-amber-600"></i> How the 24-Hour Hold Works:</span>
+                <p>Prototype only: this hold is shown locally in your browser. It does not lock inventory or notify the owner in Supabase.</p>
+            </div>
+
+            <div class="flex justify-end space-x-2 pt-2">
+                <button type="button" onclick="closeModal('modalPreHoldForm')" class="px-4 py-2 border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold">Cancel</button>
+                <button type="submit" class="px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold shadow-md">Confirm Hold & Submit</button>
+            </div>
+        </form>
+
+    </div>
+</div>
+
+<!-- MODAL 3: HOLD CONFIRMATION & NEXT STEPS MODAL -->
+<div id="modalHoldConfirmation" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop overflow-y-auto">
+    <div class="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200 my-8 p-6 text-center space-y-4">
+        
+        <div class="w-16 h-16 bg-brand-100 text-brand-600 rounded-full flex items-center justify-center mx-auto text-3xl">
+            <i class="fa-solid fa-circle-check"></i>
+        </div>
+
+        <h3 class="text-xl font-bold text-slate-900">Demo Hold Requested</h3>
+        <p class="text-xs text-slate-600">Your request is saved only in this browser session for demonstration. It has not been dispatched to the landlord or reserved in the database.</p>
+
+        <!-- Next Steps Box -->
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 text-left text-xs space-y-2">
+            <h4 class="font-bold text-slate-900 uppercase tracking-wider text-[10px] text-brand-700">Prototype Next Steps:</h4>
+            <ul class="space-y-1.5 text-slate-700">
+                <li class="flex items-start"><i class="fa-solid fa-1 text-brand-600 mr-2 mt-0.5"></i> <span>For a real reservation, contact the landlord directly; no SMS is sent by this demo.</span></li>
+                <li class="flex items-start"><i class="fa-solid fa-2 text-brand-600 mr-2 mt-0.5"></i> <span>Arrange a real visit with the landlord separately; the demo form does not book a slot.</span></li>
+                <li class="flex items-start"><i class="fa-solid fa-3 text-brand-600 mr-2 mt-0.5"></i> <span>The in-app chat currently simulates landlord responses and cannot reschedule a real visit.</span></li>
+            </ul>
+        </div>
+
+        <div class="pt-2 flex flex-col space-y-2">
+            <button onclick="closeModal('modalHoldConfirmation')" class="w-full py-2.5 bg-brand-600 text-white font-bold rounded-xl text-xs shadow-md hover:bg-brand-700">Got it, Return to Portal</button>
+            <button onclick="revokeActiveHold()" class="w-full py-2 border border-rose-200 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-semibold">Change My Mind / Cancel Hold Request</button>
+        </div>
+
+    </div>
+</div>
+
+<!-- MODAL 4: ADMIN / OWNER AUTH PIN MODAL -->
+<div id="modalOwnerAuth" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center space-y-4">
+        
+        <div class="w-12 h-12 bg-slate-900 text-white rounded-xl flex items-center justify-center mx-auto text-xl">
+            <i class="fa-solid fa-lock"></i>
+        </div>
+
+        <div>
+            <h3 class="text-base font-bold text-slate-900">Landlord & Admin Portal Access</h3>
+            <p class="text-xs text-slate-500">Restricted area for verified property owners</p>
+        </div>
+
+        <form id="ownerAuthForm" onsubmit="verifyOwnerPasscode(event)" class="space-y-3 text-left">
+            <div id="ownerEmailRow" class="hidden">
+                <label class="block text-xs font-bold text-slate-700 mb-1" for="ownerEmail">Landlord Email</label>
+                <input type="email" id="ownerEmail" autocomplete="username" class="w-full border border-slate-300 rounded-lg p-2.5 text-xs" placeholder="landlord@example.com">
+            </div>
+            <div>
+                <label id="ownerPasswordLabel" class="block text-xs font-bold text-slate-700 mb-1" for="adminPasscode">Demo Passcode</label>
+                <input type="password" id="adminPasscode" autocomplete="current-password" class="w-full border border-slate-300 rounded-lg p-2.5 text-xs" placeholder="Passcode or account password" required>
+                <p id="ownerAuthHint" class="text-[10px] text-slate-500 mt-1">Demo only: use <strong>admin123</strong>. In Supabase mode, use an approved landlord account.</p>
+            </div>
+            <div class="flex space-x-2 pt-2">
+                <button type="button" onclick="closeModal('modalOwnerAuth')" class="w-1/2 py-2 border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold">Cancel</button>
+                <button type="submit" id="ownerLoginSubmit" class="w-1/2 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-md">Authenticate</button>
+            </div>
+        </form>
+
+    </div>
+</div>
+
+
+<!-- PROPERTY LISTING EDITOR: works in demo mode and persists in Supabase mode -->
+<div id="modalListingEditor" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop overflow-y-auto">
+  <div class="bg-white rounded-2xl max-w-3xl w-full my-8 shadow-xl flex flex-col max-h-[92vh]">
+    <div class="p-4 bg-slate-900 text-white rounded-t-2xl flex items-center justify-between">
+      <div><h3 id="listingEditorTitle" class="font-bold">Add Property Listing</h3><p class="text-xs text-slate-300">Edits affect the student search, map and room viewer.</p></div>
+      <button onclick="closeModal('modalListingEditor')" type="button" aria-label="Close editor"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <form id="listingEditorForm" onsubmit="saveListing(event)" class="overflow-y-auto p-5 space-y-5 text-xs">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label class="sm:col-span-2 font-semibold">Property Title *<input id="listingTitle" required minlength="3" maxlength="160" class="input-editor" placeholder="Example: Green Dormitory Residence"></label>
+        <label class="font-semibold">Accommodation Type *
+          <select id="listingType" class="input-editor" required><option>Dormitory</option><option>Bedspace</option><option>Apartment</option></select>
+        </label>
+        <label class="font-semibold">Location Zone *
+          <select id="listingLocation" class="input-editor" required>
+            <option>Main Campus Gate 1</option><option>North Campus Area</option><option>East University Belt</option><option>East University Avenue</option><option>West Student Village</option>
+          </select>
+        </label>
+        <label class="font-semibold sm:col-span-2">Distance / Landmark<input id="listingDistance" class="input-editor" placeholder="150m from Gate 1"></label>
+        <label class="font-semibold">Latitude *<input id="listingLat" type="number" step="any" min="-90" max="90" class="input-editor" required placeholder="14.6042"></label>
+        <label class="font-semibold">Longitude *<input id="listingLng" type="number" step="any" min="-180" max="180" class="input-editor" required placeholder="120.9882"></label>
+        <label class="font-semibold">Owner / Contact Name *<input id="listingOwner" class="input-editor" required></label>
+        <label class="font-semibold">Contact Phone<input id="listingPhone" type="tel" class="input-editor"></label>
+        <label class="font-semibold sm:col-span-2">Property Main Image URL (https://)<input id="listingImage" type="url" class="input-editor" placeholder="https://images.example.com/dorm.jpg"></label>
+      </div>
+      <div class="border-t border-slate-200 pt-4 space-y-3">
+        <div class="flex justify-between items-center gap-3">
+          <div><h4 class="font-bold text-slate-900 text-sm">Room & Bedspace Details</h4><p class="text-slate-500">Add each room to preserve the existing room gallery and availability.</p></div>
+          <button type="button" onclick="addListingRoom()" class="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 px-3 py-2 rounded-lg font-semibold">+ Add Room</button>
+        </div>
+        <div id="listingRoomEditor" class="space-y-3"></div>
+      </div>
+      <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
+        <button type="button" onclick="closeModal('modalListingEditor')" class="px-4 py-2 rounded-lg border border-slate-300 font-semibold">Cancel</button>
+        <button id="saveListingButton" type="submit" class="px-5 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-bold">Save Listing</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Keep script order: SDK, settings, sample data, database service, application. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script src="js/demo-data.js"></script>
+<script src="js/supabase-service.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
