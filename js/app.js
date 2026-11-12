@@ -26,6 +26,7 @@ const samplePreExistingOccupancy = Object.fromEntries(sampleDormsData.flatMap(d 
     })));
 let tenantRecords = []; // Owner-confirmed rentals, never created by a student hold alone.
 let rentRecords = []; // Generated monthly due dates, paid/unpaid records.
+const expandedTenantPaymentHistory = new Set(); // Keep history open across payment refreshes.
 let pendingRentalHoldId = null;
 let ownerRentLoadInProgress = false;
 let liveChatRefreshTimer = null;
@@ -713,47 +714,112 @@ function getPaymentViewRecords() {
         };
     }).filter(Boolean).sort((a,b) => b.dueDate.localeCompare(a.dueDate));
 }
+function toggleTenantPaymentHistory(tenancyId) {
+    if (expandedTenantPaymentHistory.has(tenancyId)) expandedTenantPaymentHistory.delete(tenancyId);
+    else expandedTenantPaymentHistory.add(tenancyId);
+    renderRentTracker();
+}
 function renderRentTracker() {
     const body = document.getElementById('adminPaymentsTable');
     if (!body) return;
+
+    // The record index is preserved for the existing reminder and payment functions.
     const all = getPaymentViewRecords();
+    const indexed = all.map((payment, index) => ({ payment, index }));
+    const byTenant = new Map();
+    for (const item of indexed) {
+        if (!byTenant.has(item.payment.tenantId)) byTenant.set(item.payment.tenantId, []);
+        byTenant.get(item.payment.tenantId).push(item);
+    }
     const filter = document.getElementById('paymentStatusFilter')?.value || 'all';
-    const visible = all.map((p,idx)=>({p,idx}))
-        .filter(({p})=>filter==='all' || p.status.toLowerCase()===filter);
-    body.innerHTML = visible.length ? visible.map(({p,idx})=>`
-        <tr class="hover:bg-slate-50">
-          <td class="p-3"><strong class="block text-slate-900">${escHtml(p.tenantName)}</strong>
-              <span class="text-slate-500">${escHtml(p.phone)}</span></td>
-          <td class="p-3">${escHtml(p.unitName)}</td>
-          <td class="p-3 font-semibold whitespace-nowrap">${escHtml(formatPeso(p.amount))}</td>
-          <td class="p-3 whitespace-nowrap">${escHtml(p.dueDate)}</td>
-          <td class="p-3"><span class="inline-block rounded-full px-2 py-1 text-[10px] font-bold ${p.status==='Paid'?'bg-brand-100 text-brand-800':p.status==='Overdue'?'bg-rose-100 text-rose-800':'bg-amber-100 text-amber-800'}">${p.status}</span></td>
-          <td class="p-3 text-right"><div class="flex flex-wrap justify-end gap-1.5">
-              <button type="button" onclick="previewRentReminder(${idx})" class="px-2 py-1.5 rounded text-[10px] bg-indigo-600 text-white">Preview Reminder</button>
-              <button type="button" onclick="togglePaymentStatus(${idx})" class="px-2 py-1.5 rounded text-[10px] ${p.status==='Paid'?'bg-slate-200 text-slate-700':'bg-brand-600 text-white'}">${p.status==='Paid'?'Undo Paid':'Mark Paid'}</button>
-          </div></td>
-        </tr>`).join('') : `<tr><td colspan="6" class="p-6 text-center text-slate-500">${filter==='all'
-            ? 'No rental payment records yet. Assign a tenant to begin tracking monthly rent.'
-            : 'No payment records match this filter.'}</td></tr>`;
-    const active = tenantRecords.filter(t => t.status === 'Active');
-    document.getElementById('activeTenantsTable').innerHTML = active.length ? active.map(t=>`
-        <tr class="hover:bg-slate-50">
-          <td class="p-3"><strong class="block text-slate-900">${escHtml(t.tenant_name)}</strong><span class="text-slate-500">${escHtml(t.tenant_phone)}</span></td>
-          <td class="p-3">${escHtml(lookupPropertyName(t.listing_id))}<span class="block text-brand-700">${escHtml(t.room_name)}</span></td>
-          <td class="p-3">${escHtml(t.start_date)}</td>
-          <td class="p-3 font-semibold">${escHtml(formatPeso(t.monthly_rent))}</td>
-          <td class="p-3 text-right"><button type="button" onclick="endTenantAssignment('${escHtml(t.id)}')" class="text-rose-700 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded font-semibold">End Tenancy</button></td>
-        </tr>`).join('') : '<tr><td colspan="5" class="p-5 text-center text-slate-500">No active tenants assigned yet.</td></tr>';
-    const unpaid = all.filter(p=>p.status!=='Paid');
-    const overdue = all.filter(p=>p.status==='Overdue');
-    const paid = all.filter(p=>p.status==='Paid');
+    const tenants = tenantRecords
+        .filter(tenant => tenant.status === 'Active' || byTenant.has(tenant.id))
+        .filter(tenant => filter === 'all' || (byTenant.get(tenant.id) || [])
+            .some(({ payment }) => payment.status.toLowerCase() === filter))
+        .sort((a, b) => Number(b.status === 'Active') - Number(a.status === 'Active') ||
+            String(a.tenant_name).localeCompare(String(b.tenant_name)));
+
+    function pickDue(items) {
+        const matching = filter === 'all' ? items : items.filter(({ payment }) =>
+            payment.status.toLowerCase() === filter);
+        // Prioritize the oldest outstanding balance. Otherwise show the next
+        // upcoming due, or the most recent paid installment.
+        const overdue = matching.filter(({ payment }) => payment.status === 'Overdue')
+            .sort((a, b) => a.payment.dueDate.localeCompare(b.payment.dueDate));
+        if (overdue.length) return overdue[0];
+        const pending = matching.filter(({ payment }) => payment.status === 'Pending')
+            .sort((a, b) => a.payment.dueDate.localeCompare(b.payment.dueDate));
+        if (pending.length) return pending[0];
+        return matching.find(({ payment }) => payment.status === 'Paid') || null;
+    }
+    function statusBadge(status) {
+        const color = status === 'Paid' ? 'bg-brand-100 text-brand-800'
+            : status === 'Overdue' ? 'bg-rose-100 text-rose-800'
+            : 'bg-amber-100 text-amber-800';
+        return `<span class="inline-block rounded-full px-2 py-1 text-[10px] font-bold ${color}">${escHtml(status)}</span>`;
+    }
+    function paymentActions(item) {
+        if (!item) return '';
+        const { payment, index } = item;
+        return `${payment.status !== 'Paid' ? `<button type="button" onclick="previewRentReminder(${index})" class="px-2 py-1.5 rounded text-[10px] bg-indigo-600 text-white">Preview Reminder</button>` : ''}
+                <button type="button" onclick="togglePaymentStatus(${index})" class="px-2 py-1.5 rounded text-[10px] ${payment.status === 'Paid' ? 'bg-slate-200 text-slate-700' : 'bg-brand-600 text-white'}">${payment.status === 'Paid' ? 'Undo Paid' : 'Mark Paid'}</button>`;
+    }
+
+    body.innerHTML = tenants.length ? tenants.map(tenant => {
+        const items = byTenant.get(tenant.id) || [];
+        const focus = pickDue(items);
+        const due = focus?.payment;
+        const open = expandedTenantPaymentHistory.has(tenant.id);
+        const overdueCount = items.filter(({ payment }) => payment.status === 'Overdue').length;
+        const endButton = tenant.status === 'Active'
+            ? `<button type="button" onclick="endTenantAssignment('${escHtml(tenant.id)}')" class="px-2 py-1.5 rounded text-[10px] bg-rose-50 border border-rose-200 text-rose-700">End Tenancy</button>` : '';
+        const historyButton = items.length
+            ? `<button type="button" aria-expanded="${open}" aria-controls="tenant-history-${escHtml(tenant.id)}" onclick="toggleTenantPaymentHistory('${escHtml(tenant.id)}')" class="px-2 py-1.5 rounded text-[10px] bg-slate-100 border border-slate-200 text-slate-700">${open ? 'Hide' : 'Payment'} History (${items.length})</button>` : '';
+        const history = open ? `<tr id="tenant-history-${escHtml(tenant.id)}" class="bg-slate-50">
+            <td colspan="6" class="px-4 py-3">
+                <p class="text-[11px] font-bold text-slate-700 mb-2">Monthly payment history — ${escHtml(tenant.tenant_name)}</p>
+                <div class="overflow-x-auto"><table class="w-full text-xs text-left">
+                    <thead><tr class="text-slate-500 border-b border-slate-200">
+                        <th class="p-2">Due Date</th><th class="p-2">Amount</th>
+                        <th class="p-2">Status</th><th class="p-2 text-right">Actions</th>
+                    </tr></thead><tbody>${items.map(item => `<tr class="border-b border-slate-100">
+                        <td class="p-2 whitespace-nowrap">${escHtml(item.payment.dueDate)}</td>
+                        <td class="p-2 whitespace-nowrap font-semibold">${escHtml(formatPeso(item.payment.amount))}</td>
+                        <td class="p-2">${statusBadge(item.payment.status)}</td>
+                        <td class="p-2"><div class="flex flex-wrap justify-end gap-1.5">${paymentActions(item)}</div></td>
+                    </tr>`).join('')}</tbody></table></div>
+            </td>
+        </tr>` : '';
+        return `<tr class="hover:bg-slate-50 align-top">
+            <td class="p-3"><strong class="block text-slate-900">${escHtml(tenant.tenant_name)}</strong>
+                <span class="text-slate-500">${escHtml(tenant.tenant_phone || '')}</span>
+                ${tenant.status === 'Active' ? '' : '<span class="block text-[10px] text-slate-500">Tenancy ended</span>'}</td>
+            <td class="p-3">${escHtml(lookupPropertyName(tenant.listing_id))}
+                <span class="block text-brand-700">${escHtml(tenant.room_name)}</span>
+                <span class="block text-[10px] text-slate-500">Move-in: ${escHtml(tenant.start_date)}</span></td>
+            <td class="p-3 font-semibold whitespace-nowrap">${escHtml(formatPeso(tenant.monthly_rent))}</td>
+            <td class="p-3 whitespace-nowrap">${due ? escHtml(due.dueDate) : 'No due generated'}
+                ${overdueCount > 1 && filter === 'all' ? `<span class="block text-[10px] text-rose-600">${overdueCount} overdue dues</span>` : ''}</td>
+            <td class="p-3">${due ? statusBadge(due.status) : '<span class="text-slate-400">—</span>'}</td>
+            <td class="p-3"><div class="flex flex-wrap justify-end gap-1.5">
+                ${paymentActions(focus)}${historyButton}${endButton}
+            </div></td>
+        </tr>${history}`;
+    }).join('') : `<tr><td colspan="6" class="p-6 text-center text-slate-500">${filter === 'all'
+        ? 'No tenant assignments yet. Select "Assign a Tenant" to begin tracking rent.'
+        : 'No tenants have payment records matching this status.'}</td></tr>`;
+
+    const active = tenantRecords.filter(tenant => tenant.status === 'Active');
+    const unpaid = all.filter(payment => payment.status !== 'Paid');
+    const overdue = all.filter(payment => payment.status === 'Overdue');
+    const paid = all.filter(payment => payment.status === 'Paid');
     const blocks = [
-        ['Active Tenants',active.length,'Signed rental agreements'],
-        ['Unpaid Dues',formatPeso(unpaid.reduce((sum,p)=>sum+p.amount,0)),'Pending and overdue'],
-        ['Overdue Dues',formatPeso(overdue.reduce((sum,p)=>sum+p.amount,0)),`${overdue.length} overdue monthly record(s)`],
-        ['Recorded Paid',formatPeso(paid.reduce((sum,p)=>sum+p.amount,0)),'Marked paid by landlord']
+        ['Active Tenants', active.length, 'Current room assignments'],
+        ['Unpaid Dues', formatPeso(unpaid.reduce((sum, payment) => sum + payment.amount, 0)), 'Pending and overdue'],
+        ['Overdue Dues', formatPeso(overdue.reduce((sum, payment) => sum + payment.amount, 0)), `${overdue.length} overdue monthly record(s)`],
+        ['Recorded Paid', formatPeso(paid.reduce((sum, payment) => sum + payment.amount, 0)), 'Marked paid by landlord']
     ];
-    document.getElementById('rentTrackerSummary').innerHTML = blocks.map(([title,value,detail])=>`
+    document.getElementById('rentTrackerSummary').innerHTML = blocks.map(([title, value, detail]) => `
         <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
           <p class="text-[10px] text-slate-500 font-bold uppercase">${escHtml(title)}</p>
           <p class="text-xl font-black text-slate-900 mt-1">${escHtml(value)}</p>

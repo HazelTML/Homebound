@@ -286,41 +286,33 @@
                 <p><strong>Rent monitoring, not payment collection.</strong> Rent records are generated from saved tenant assignments. Mark payments as paid after verifying them with the tenant. "Preview Reminder" shows suggested SMS text; it does not send a message or transfer money.</p>
             </div>
             <div id="rentTrackerSummary" class="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-live="polite"></div>
+            <!-- One tenant row with the most relevant due; history expands on demand. -->
             <div class="space-y-3">
                 <div class="flex flex-wrap justify-between gap-2 items-center">
-                    <h4 class="font-bold text-slate-900">Monthly Payment Records</h4>
+                    <div>
+                        <h4 class="font-bold text-slate-900">Tenants & Monthly Rent</h4>
+                        <p class="text-xs text-slate-500 mt-1">Each tenant appears once. The oldest unpaid due is shown first; expand Payment History for every month.</p>
+                    </div>
                     <label class="text-xs text-slate-600">Show
                         <select id="paymentStatusFilter" class="border border-slate-300 rounded-md px-2 py-1 ml-1 bg-white" onchange="renderAdminTables()">
-                            <option value="all">All statuses</option><option value="pending">Pending</option>
-                            <option value="overdue">Overdue</option><option value="paid">Paid</option>
+                            <option value="all">All tenants</option>
+                            <option value="pending">Pending dues</option>
+                            <option value="overdue">Overdue dues</option>
+                            <option value="paid">Paid dues</option>
                         </select>
                     </label>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="w-full text-left text-xs border-collapse">
                         <thead><tr class="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider">
-                            <th class="p-3 rounded-l-lg">Tenant Name</th>
-                            <th class="p-3">Assigned Unit</th>
-                            <th class="p-3">Monthly Due</th>
-                            <th class="p-3">Due Date</th>
-                            <th class="p-3">Status</th>
-                            <th class="p-3 rounded-r-lg text-right">Reminder & Record Payment</th>
+                            <th class="p-3 rounded-l-lg">Tenant</th>
+                            <th class="p-3">Property / Room</th>
+                            <th class="p-3">Monthly Rent</th>
+                            <th class="p-3">Relevant Due</th>
+                            <th class="p-3">Payment Status</th>
+                            <th class="p-3 rounded-r-lg text-right">Actions</th>
                         </tr></thead>
                         <tbody id="adminPaymentsTable" class="divide-y divide-slate-200 text-slate-700"></tbody>
-                    </table>
-                </div>
-            </div>
-            <div class="pt-5 border-t border-slate-200 space-y-3">
-                <h4 class="font-bold text-slate-900">Active Tenants & Room Assignments</h4>
-                <p class="text-xs text-slate-500">Ending a tenancy frees its room or bedspace. Payment history is retained.</p>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left text-xs border-collapse">
-                        <thead><tr class="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider">
-                            <th class="p-3">Tenant</th><th class="p-3">Property / Room</th>
-                            <th class="p-3">Move-in</th><th class="p-3">Monthly Rent</th>
-                            <th class="p-3 text-right">Actions</th>
-                        </tr></thead>
-                        <tbody id="activeTenantsTable" class="divide-y divide-slate-200 text-slate-700"></tbody>
                     </table>
                 </div>
             </div>
