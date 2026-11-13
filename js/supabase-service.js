@@ -29,6 +29,8 @@ const HomeboundStore = (() => {
             rooms: (Array.isArray(row.rooms) ? row.rooms : []).map(r => ({
                 name: String(r.name || ''), price: Number(r.price || 0),
                 capacity: String(r.capacity || ''), status: String(r.status || 'Available'),
+                totalCapacity: Number(r.totalCapacity) || null,
+                beds: Array.isArray(r.beds) ? r.beds.map(b => ({ id: String(b.id), status: String(b.status) })) : [],
                 images: Array.isArray(r.images) ? r.images : [],
                 amenities: Array.isArray(r.amenities) ? r.amenities : [], note: String(r.note || '')
             }))
@@ -94,17 +96,32 @@ const HomeboundStore = (() => {
         if (error) throw error;
         return data.id;
     }
+    // Upload originals as binary files (never blob: preview URLs or base64 strings).
+    // Network errors are distinguished from Storage permissions and validation errors.
     async function uploadImage(file) {
         const owner = await currentOwner();
-        if (!owner) throw new Error('Please sign in to upload photos.');
-        if (!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024)
-            throw new Error('Images must be JPEG, PNG or WEBP and under 5MB.');
-        const ext = ({'image/jpeg':'jpg','image/png':'png','image/webp':'webp'})[file.type];
-        const filename = `${owner.id}/${crypto.randomUUID()}.${ext}`;
-        const { error } = await getClient().storage.from('listing-images').upload(filename, file,
-            { cacheControl: '3600', contentType: file.type, upsert: false });
-        if (error) throw error;
-        return getClient().storage.from('listing-images').getPublicUrl(filename).data.publicUrl;
+        if (!owner) throw new Error('Please sign in as an approved landlord to upload photos.');
+        if (!(file instanceof File)) throw new Error('Please select an image file again.');
+        const allowed = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+        if (!allowed[file.type]) throw new Error('Only JPG, PNG, and WEBP photos are supported.');
+        if (!file.size || file.size > 5 * 1024 * 1024) throw new Error('Image files must be between 1 byte and 5 MB.');
+        const filename = `${owner.id}/${crypto.randomUUID()}.${allowed[file.type]}`;
+        try {
+            const { data, error } = await getClient().storage.from('listing-images').upload(filename, file, {
+                cacheControl: '3600', contentType: file.type, upsert: false
+            });
+            if (error) throw error;
+            if (!data?.path) throw new Error('Storage did not confirm the uploaded file.');
+            const { data: publicFile } = getClient().storage.from('listing-images').getPublicUrl(data.path);
+            const publicUrl = publicFile?.publicUrl || '';
+            if (!publicUrl.startsWith('https://')) throw new Error('Storage did not return a valid image URL.');
+            return publicUrl;
+        } catch (err) {
+            if (err instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(String(err?.message || ''))) {
+                throw new Error('Supabase Storage is unreachable. Check your Project URL, internet connection, and browser Network tab.');
+            }
+            throw new Error(`Photo upload rejected: ${err?.message || 'Unknown Storage error'}. Check the listing-images bucket and its upload policy.`);
+        }
     }
     async function callRpc(name, params) {
         const { data, error } = await getClient().rpc(name, params);
@@ -112,11 +129,13 @@ const HomeboundStore = (() => {
         return data;
     }
     async function createHold(payload) {
-        return callRpc('homebound_create_hold', {
+        return callRpc('homebound_create_hold_with_chat', {
             p_listing_id: payload.dormId, p_room_name: payload.roomName,
             p_student_name: payload.studentName, p_student_phone: payload.phone,
             p_student_email: payload.email, p_visit_date: payload.visitDate,
-            p_visit_time: payload.visitTime, p_request_token: payload.token
+            p_visit_time: payload.visitTime, p_request_token: payload.token,
+            p_chat_token: payload.chatToken,
+            p_conversation_id: payload.conversationId || null
         });
     }
     const getHold = (id, token) => callRpc('homebound_get_hold', { p_id: id, p_token: token });
@@ -161,14 +180,18 @@ const HomeboundStore = (() => {
         return data || [];
     }
     async function assignTenant(payload) {
-        return callRpc('homebound_create_tenancy', {
+        return callRpc('homebound_assign_bed', {
             p_listing_id: payload.listingId, p_room_name: payload.roomName,
+            p_bed_slot: payload.bedSlot,
             p_tenant_name: payload.tenantName, p_phone: payload.phone,
             p_email: payload.email || '', p_start_date: payload.startDate,
             p_due_day: payload.dueDay, p_monthly_rent: payload.monthlyRent,
             p_hold_id: payload.holdId || null
         });
     }
+    const setBedAvailable = (listingId, roomName, bedSlot, available) => callRpc('homebound_set_bed_available', {
+        p_listing_id: listingId, p_room_name: roomName, p_bed_slot: bedSlot, p_available: available
+    });
     const endTenancy = id => callRpc('homebound_end_tenancy', { p_tenancy_id: id });
     const syncRentPayments = () => callRpc('homebound_sync_payments', {});
     async function listRentPayments() {
@@ -198,6 +221,6 @@ const HomeboundStore = (() => {
     return { configured, getClient, list, currentOwner, login, logout, create, update, remove,
         uploadImage, createHold, getHold, cancelHold, setHoldStatus, listHolds,
         studentSend, studentMessages, listConversations, ownerMessages, ownerReply,
-        listTenancies, assignTenant, endTenancy, syncRentPayments, listRentPayments, setRentPaid,
+        listTenancies, assignTenant, setBedAvailable, endTenancy, syncRentPayments, listRentPayments, setRentPaid,
         subscribe, unsubscribe };
 })();
