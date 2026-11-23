@@ -1,7 +1,11 @@
 /* Homebound application: original UI functions retained and extended. */
 /* App state. Sample records are used only in demo mode. */
 let currentPortal = 'student';
-let activeUserHold = null;
+let activeUserHold = null; // Selected hold in the details modal (legacy compatibility).
+let studentHolds = []; // Multiple independent holds per student browser.
+let hiddenHoldStatuses = {}; // Dismiss only the status that the student has seen.
+let holdStatusPollBusy = false;
+let holdStatusTimer = null;
 let activeDormViewing = null;
 let selectedRoomIndex = 0;
 let dormsData = JSON.parse(JSON.stringify(sampleDormsData));
@@ -34,6 +38,37 @@ let ownerRefreshTimer = null;
 let aiContext = null;
 let reportCharts = [];
 const imageTypes = ['image/jpeg', 'image/png', 'image/webp'];
+const FALLBACK_IMAGE = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22800%22 height=%22500%22 viewBox=%220 0 800 500%22%3E%3Crect width=%22800%22 height=%22500%22 fill=%22%23e2e8f0%22/%3E%3Cpath d=%22M280 305l85-95 72 77 46-44 95 101H280Z%22 fill=%22%2394a3b8%22/%3E%3Ccircle cx=%22390%22 cy=%22175%22 r=%2230%22 fill=%22%2394a3b8%22/%3E%3Ctext x=%22400%22 y=%22415%22 text-anchor=%22middle%22 fill=%22%23475569%22 font-size=%2224%22 font-family=%22sans-serif%22%3EPhoto not available%3C/text%3E%3C/svg%3E';
+let studentInboxTimer = null;
+let studentInboxRecords = [];
+let studentInboxBusy = false;
+function onImageLoadError(image) {
+    image.onerror = null;
+    image.src = FALLBACK_IMAGE;
+}
+function displayBedSlots(room) {
+    if (Array.isArray(room?.beds) && room.beds.length) return room.beds;
+    const fallback = /bedspace|beds?/i.test(String(room?.capacity || ''))
+        ? Number((String(room?.capacity || '').match(/\d+/) || [1])[0]) : 1;
+    const total = Math.max(1, Math.min(100, Number(room?.totalCapacity) || fallback));
+    const match = String(room?.status || '').match(/(\d+)\s+beds?\s+left/i);
+    const available = match ? Math.min(total, Number(match[1])) : isRoomAvailable(room?.status ?? 'Available') ? total : 0;
+    return Array.from({length:total}, (_, i) => ({
+        id: `bed-${i+1}`, status: i < available ? 'Available' : 'Unavailable'
+    }));
+}
+function syncBedCountStatus(room) {
+    const beds = displayBedSlots(room);
+    room.totalCapacity = beds.length;
+    room.beds = beds;
+    const free = beds.filter(b => b.status === 'Available').length;
+    room.status = free ? `Available (${free} ${free===1?'bed':'beds'} left)` : 'Full / Occupied';
+    return free;
+}
+function bedActionParams(...values) {
+    return values.map(x => escHtml(JSON.stringify(x))).join(',');
+}
+
 const ROOM_AMENITIES = ['Wi-Fi', 'Aircon', 'Study Desk', 'Private Bathroom', 'Shared Bathroom',
     'Laundry Area', 'Kitchen', 'CCTV / Security', 'Personal Locker', 'Parking'];
 
@@ -49,7 +84,7 @@ function safeImageUrl(value) {
             return escHtml(url.href);
         }
     } catch (_) { /* use fallback */ }
-    return 'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?auto=format&fit=crop&w=800&q=80';
+    return FALLBACK_IMAGE;
 }
 function isRoomAvailable(status) {
     return /available/i.test(String(status)) && !/unavailable/i.test(String(status));
@@ -60,6 +95,7 @@ function validListingId(id) {
 function refreshListingViews() {
     applyFilters();
     if (currentPortal === 'owner') renderAdminListings();
+    reconcileOpenListingEditor();
     if (activeDormViewing) {
         const newer = dormsData.find(d => d.id === activeDormViewing.id);
         if (!newer) {
@@ -80,6 +116,7 @@ async function loadListings() {
     try {
         const loaded = await HomeboundStore.list();
         dormsData = loaded;
+        dormsData.forEach(d => d.rooms.forEach(syncBedCountStatus));
         document.getElementById('connectionStatus').textContent = 'Supabase connected';
         document.getElementById('listingSourceText').textContent = 'Live property listings updated by approved landlords';
         refreshListingViews();
@@ -95,6 +132,13 @@ async function loadListings() {
 
 let leafletMap = null;
 let mapMarkers = [];
+let listingPinMap = null;
+let listingPinMarker = null;
+let listingDraftCoordinates = null;
+
+document.addEventListener('error', event => {
+    if (event.target instanceof HTMLImageElement) onImageLoadError(event.target);
+}, true);
 
 window.onload = async function() {
     if (window.L) initLeafletMap();
@@ -104,9 +148,17 @@ window.onload = async function() {
     if (window.Chart) initAnalyticsCharts();
 
     restoreActiveHold();
+    holdStatusTimer = setInterval(refreshActiveHold, 15000);
+    window.addEventListener('focus', refreshActiveHold);
     updateAIAssistant();
     refreshDashboardStats();
     const status = document.getElementById('connectionStatus');
+    // Poll token-scoped student messages because anonymous clients cannot subscribe
+    // directly to private chat tables. Also checks conversations after page reload.
+    dormsData.forEach(d => d.rooms.forEach(syncBedCountStatus));
+    pollStudentInbox();
+    studentInboxTimer = setInterval(pollStudentInbox, 12000);
+    window.addEventListener('focus', pollStudentInbox);
     if (!HomeboundStore.configured) {
         status.textContent = 'Local preview';
         return;
@@ -132,8 +184,8 @@ window.onload = async function() {
 };
 
 function initLeafletMap() {
-    // Center map around university belt
-    leafletMap = L.map('map').setView([14.6055, 120.9885], 15);
+    // Baguio City, Benguet, Philippines. Never invent property coordinates.
+    leafletMap = L.map('map').setView([16.4023, 120.5960], 13);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors'
@@ -148,17 +200,59 @@ function updateMapMarkers(items) {
     mapMarkers.forEach(marker => leafletMap.removeLayer(marker));
     mapMarkers = [];
     items.forEach(item => {
-        if (!Number.isFinite(item.lat) || !Number.isFinite(item.lng)) return;
-        const marker = L.marker([item.lat, item.lng]).addTo(leafletMap)
-            .bindPopup(`
-                <div class="text-xs p-1">
-                    <strong class="font-bold text-slate-900 block">${escHtml(item.title)}</strong>
-                    <span class="text-brand-700 font-bold block">${escHtml(item.priceRangeStr)}</span>
-                    <button onclick="openBedspaceViewer('${validListingId(item.id) ? item.id : ''}')" class="mt-2 bg-brand-600 text-white text-[10px] px-2 py-1 rounded w-full font-bold">View Rooms</button>
-                </div>
-            `);
+        if (!Number.isFinite(item.lat) || !Number.isFinite(item.lng) ||
+            item.lat < -90 || item.lat > 90 || item.lng < -180 || item.lng > 180) return;
+        const marker = L.marker([item.lat, item.lng], {
+            title: item.title, alt: `View ${item.title}`
+        }).addTo(leafletMap);
+        marker.bindTooltip(escHtml(item.title), {direction:'top'});
+        // One click opens the precise listing, including its rooms and images.
+        marker.on('click', () => openBedspaceViewer(item.id));
         mapMarkers.push(marker);
     });
+}
+
+function initializeListingPinMap() {
+    const container = document.getElementById('listingPinMap');
+    if (!container) return;
+    if (!window.L) {
+        document.getElementById('listingPinStatus').textContent = 'Map cannot load. Check the network and try again.';
+        return;
+    }
+    if (!listingPinMap) {
+        listingPinMap = L.map(container).setView([16.4023, 120.5960], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution:'&copy; OpenStreetMap contributors', maxZoom:19
+        }).addTo(listingPinMap);
+        listingPinMap.on('click', e => setListingPin(e.latlng.lat,e.latlng.lng));
+    }
+    setTimeout(() => {
+        listingPinMap.invalidateSize();
+        if (listingDraftCoordinates) listingPinMap.setView([listingDraftCoordinates.lat,listingDraftCoordinates.lng],16);
+        else listingPinMap.setView([16.4023,120.5960],13);
+    }, 100);
+}
+function setListingPin(lat,lng) {
+    lat=Number(lat);lng=Number(lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+    listingDraftCoordinates={lat,lng};
+    if (listingPinMap) {
+        if (!listingPinMarker) {
+            listingPinMarker=L.marker([lat,lng],{draggable:true,title:'Drag to refine property location'}).addTo(listingPinMap);
+            listingPinMarker.on('dragend', () => {
+                const point=listingPinMarker.getLatLng();
+                setListingPin(point.lat,point.lng);
+            });
+        } else listingPinMarker.setLatLng([lat,lng]);
+    }
+    document.getElementById('listingPinStatus').textContent=`Pinned at ${lat.toFixed(6)}, ${lng.toFixed(6)} · drag marker to adjust`;
+}
+function clearListingPin() {
+    listingDraftCoordinates=null;
+    if (listingPinMap && listingPinMarker) listingPinMap.removeLayer(listingPinMarker);
+    listingPinMarker=null;
+    const label=document.getElementById('listingPinStatus');
+    if (label) label.textContent='No location pinned yet. Click the map to add one.';
 }
 
 function switchPortal(targetPortal) {
@@ -184,6 +278,9 @@ function switchPortal(targetPortal) {
         setTimeout(() => leafletMap?.invalidateSize(), 80);
     }
     updateAIAssistant();
+    renderStudentInbox();
+    refreshHoldBanner();
+    if (targetPortal === 'student') {pollStudentInbox();refreshActiveHold();}
 }
 
 function attemptOwnerLogin() {
@@ -354,7 +451,7 @@ function renderRoomDetails() {
     if (!room) return;
     document.getElementById('modalRoomName').innerText = room.name;
     document.getElementById('modalRoomPrice').innerText = `₱${Number(room.price).toLocaleString()} / mo`;
-    document.getElementById('modalRoomCap').innerText = room.capacity;
+    document.getElementById('modalRoomCap').innerText = `${displayBedSlots(room).filter(b=>b.status==='Available').length} / ${displayBedSlots(room).length} beds available`;
     document.getElementById('modalRoomTypeTag').innerText = activeDormViewing.type;
     document.getElementById('modalRoomDesc').textContent = room.note ? `${room.note} • Status: ${room.status}` : `Room status: ${room.status}`;
     document.getElementById('modalPropertyNote').textContent = activeDormViewing.note || '';
@@ -404,14 +501,23 @@ function selectRoomIndex(idx) {
 /* ==========================================================================
    24-HOUR HOLD & VISITATION WORKFLOW
    ========================================================================== */
+function normalizeVisitTimeInput(input) {
+    const raw=String(input.value || '').trim();
+    let hour,minute;
+    const withColon=raw.match(/^(\d{1,2}):(\d{2})$/);
+    const digits=raw.match(/^(\d{3,4})$/);
+    if (withColon) { hour=Number(withColon[1]);minute=Number(withColon[2]); }
+    else if (digits) { hour=Number(raw.slice(0,-2));minute=Number(raw.slice(-2)); }
+    else return false;
+    if (!Number.isInteger(hour) || hour>23 || !Number.isInteger(minute) || minute>59) return false;
+    input.value=`${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}`;
+    return true;
+}
+
 
 function openPreHoldForm() {
     if (!isRoomAvailable(activeDormViewing?.rooms[selectedRoomIndex]?.status)) {
         showToast('This room is currently occupied or unavailable.', 'error'); return;
-    }
-    if (activeUserHold && !['Cancelled by Student','Declined','Expired'].includes(activeUserHold.status)) {
-        showToast('You already have a hold request. Cancel it before creating another.', 'error');
-        openHoldStatusModal(); return;
     }
     const date = document.getElementById('holdVisitDate');
     date.min = localDateISO(new Date());
@@ -431,28 +537,55 @@ async function submitHoldRequest(e) {
     const phone = document.getElementById('holdStudentPhone').value.trim();
     const email = document.getElementById('holdStudentEmail').value.trim();
     const visitDate = document.getElementById('holdVisitDate').value;
-    const visitTime = document.getElementById('holdVisitTime').value;
-    if (!name || !phone || !email || !visitDate || !visitTime || visitDate < localDateISO(new Date())) {
-        showToast('Please complete the visitation form with a future date.', 'error'); return;
+    const visitTimeInput = document.getElementById('holdVisitTime');
+    if (!normalizeVisitTimeInput(visitTimeInput)) {
+        showToast('Enter a valid visitation time (HH:MM, such as 09:30).', 'error'); return;
+    }
+    const visitTime = visitTimeInput.value;
+    if (!name || !phone || !email || !visitDate || visitDate < localDateISO(new Date())) {
+        showToast('Please complete the visitation form with today or a future date.', 'error'); return;
+    }
+    if (visitTime < '08:00' || visitTime > '20:00') {
+        showToast('Select a visitation time from 08:00 to 20:00.', 'error'); return;
     }
     const room = activeDormViewing.rooms[selectedRoomIndex];
     const token = crypto.randomUUID();
+    let previousChat = {};
+    try { previousChat = JSON.parse(localStorage.getItem(`homebound-chat-${activeDormViewing.id}`) || '{}') || {}; }
+    catch (_) { previousChat = {}; }
     const payload = { dormId: activeDormViewing.id, dormTitle: activeDormViewing.title,
         roomName: room.name, studentName: name, phone, email, visitDate, visitTime,
-        token, timestamp: new Date().toISOString(), status: 'Pending Approval' };
+        token, chatToken: previousChat.token || crypto.randomUUID(),
+        conversationId: previousChat.id || null,
+        timestamp: new Date().toISOString(), status: 'Pending Approval' };
     button.disabled = true;
     button.textContent = 'Submitting…';
     try {
         if (HomeboundStore.configured) {
             const result = await HomeboundStore.createHold(payload);
             payload.id = result.id;
+            payload.conversationId = result.conversationId;
         } else {
             payload.id = crypto.randomUUID();
+            let conv = demoConversations.find(c => c.id === payload.conversationId);
+            if (!conv) {
+                payload.conversationId = crypto.randomUUID();
+                conv = { id:payload.conversationId, listingId:payload.dormId,
+                    updatedAt:new Date().toISOString(), messages:[] };
+                demoConversations.unshift(conv);
+            }
             visitationsList.unshift({ id: payload.id, ...payload, studentPhone: phone,
                 studentEmail: email, visitSlot: formatVisitTime(visitTime), status: 'Pending Approval' });
         }
+        studentHolds.unshift(payload);
         activeUserHold = payload;
-        localStorage.setItem('homebound-active-hold', JSON.stringify(payload));
+        // New requests are always shown, even if previous status alerts were dismissed.
+        saveStudentHolds();
+        localStorage.setItem('homebound-chat-'+payload.dormId, JSON.stringify({
+            id:payload.conversationId, token:payload.chatToken,
+            seenOwnerIds:previousChat.seenOwnerIds || []
+        }));
+        pollStudentInbox();
         refreshHoldBanner();
         if (currentPortal === 'owner') await loadOwnerData();
         else renderAdminTables();
@@ -467,29 +600,37 @@ async function submitHoldRequest(e) {
     }
 }
 
-async function openHoldStatusModal() {
-    if (!activeUserHold) { showToast('You have no active hold request.', 'info'); return; }
+async function openHoldStatusModal(holdId = null) {
+    if (!studentHolds.length) { showToast('You have no hold requests yet.', 'info'); return; }
+    if (holdId) activeUserHold=studentHolds.find(h=>h.id===holdId) || activeUserHold;
+    else activeUserHold=studentHolds.find(h=>h.id===activeUserHold?.id) || studentHolds[0];
     await refreshActiveHold();
+    renderStudentHoldList();
     document.getElementById('modalHoldConfirmation').classList.remove('hidden');
 }
-
+function selectStudentHold(id) {
+    activeUserHold=studentHolds.find(h=>h.id===id) || activeUserHold;
+    renderStudentHoldList();
+}
 async function revokeActiveHold() {
-    if (!activeUserHold) return;
+    const hold=activeUserHold;
+    if (!hold || !['Pending Approval','Confirmed Visit'].includes(hold.status)) return;
     try {
         if (HomeboundStore.configured) {
-            const updated = await HomeboundStore.cancelHold(activeUserHold.id, activeUserHold.token);
-            if (!updated) throw new Error('This request is no longer cancellable.');
+            const updated = await HomeboundStore.cancelHold(hold.id, hold.token);
+            if (!updated) throw new Error('This request is no longer cancellable. Refresh its status.');
         } else {
-            const found = visitationsList.find(v => v.id === activeUserHold.id);
+            const found = visitationsList.find(v => v.id === hold.id);
             if (found) found.status = 'Cancelled by Student';
         }
-        activeUserHold = null;
-        localStorage.removeItem('homebound-active-hold');
+        hold.status='Cancelled by Student';
+        hold.statusUpdatedAt=new Date().toISOString();
+        saveStudentHolds();
         refreshHoldBanner();
-        closeModal('modalHoldConfirmation');
+        renderStudentHoldList();
         if (currentPortal === 'owner') await loadOwnerData();
         renderAdminTables();
-        showToast('Hold request cancelled successfully.', 'success');
+        showToast('Selected hold request cancelled.', 'success');
     } catch (err) { showToast(`Could not cancel request: ${err.message}`, 'error'); }
 }
 
@@ -555,8 +696,12 @@ async function sendLiveChatMessage(messageOverride) {
                 created_at: new Date().toISOString() });
             conversation.updatedAt = new Date().toISOString();
         }
-        localStorage.setItem(`homebound-chat-${studentChatListingId}`,
-            JSON.stringify({ id: studentConversationId, token: studentChatToken }));
+        const chatKey = `homebound-chat-${studentChatListingId}`;
+        let oldChat = {};
+        try { oldChat = JSON.parse(localStorage.getItem(chatKey) || '{}') || {}; } catch (_) {}
+        localStorage.setItem(chatKey, JSON.stringify({ id:studentConversationId,
+            token:studentChatToken, seenOwnerIds:oldChat.seenOwnerIds || [] }));
+        pollStudentInbox();
         input.value = '';
         await refreshStudentChat();
         if (currentPortal === 'owner') await loadOwnerInbox();
@@ -686,17 +831,14 @@ function currentPhilippineDate() {
     return `${values.year}-${values.month}-${values.day}`;
 }
 function rentalRoomCapacity(room) {
-    if (!/bedspace|beds?/i.test(String(room?.capacity || ''))) return 1;
-    const n = Number((String(room.capacity).match(/\d+/) || [1])[0]);
-    return Math.max(1, Math.min(100, n));
+    return displayBedSlots(room).length;
 }
 function activeTenantCount(listingId, roomName) {
     return tenantRecords.filter(t => t.status === 'Active' &&
         t.listing_id === listingId && t.room_name === roomName).length;
 }
 function availableRentalSlots(listingId,room) {
-    const baseline=HomeboundStore.configured ? 0 : (samplePreExistingOccupancy[JSON.stringify([listingId,room.name])] || 0);
-    return rentalRoomCapacity(room)-baseline-activeTenantCount(listingId,room.name);
+    return displayBedSlots(room).filter(b => b.status==='Available').length;
 }
 function assignedRentStatus(record) {
     return record.paid_at ? 'Paid' : String(record.due_date) < currentPhilippineDate() ? 'Overdue' : 'Pending';
@@ -806,7 +948,7 @@ function renderRentTracker() {
             </div></td>
         </tr>${history}`;
     }).join('') : `<tr><td colspan="6" class="p-6 text-center text-slate-500">${filter === 'all'
-        ? 'No tenant assignments yet. Select "Assign a Tenant" to begin tracking rent.'
+        ? 'No tenant assignments yet. Open My Property Listings and assign a tenant to begin rent tracking.'
         : 'No tenants have payment records matching this status.'}</td></tr>`;
 
     const active = tenantRecords.filter(tenant => tenant.status === 'Active');
@@ -841,6 +983,10 @@ function updateTenantRoomRate() {
     const listing = getOwnerListings().find(d=>d.id===document.getElementById('tenantListing').value);
     const room = listing?.rooms.find(r=>r.name===document.getElementById('tenantRoom').value);
     document.getElementById('tenantMonthlyRent').value = room ? String(Math.round(Number(room.price))) : '';
+    const select = document.getElementById('tenantBedSlot');
+    const available = room ? displayBedSlots(room).filter(b=>b.status==='Available') : [];
+    select.innerHTML = available.length ? available.map(b => `<option value="${escHtml(b.id)}">${escHtml(b.id.replace('bed-','Bed '))} — Available</option>`).join('')
+        : '<option value="">No vacant beds</option>';
 }
 function openTenantAssignmentModal(holdIndex = null, preferredListingId = null) {
     if (HomeboundStore.configured && !activeOwner) {
@@ -888,8 +1034,7 @@ function updateDemoRoomOccupancy(listingId,roomName) {
     const listing=dormsData.find(d=>d.id===listingId);
     const room=listing?.rooms.find(r=>r.name===roomName);
     if (!room) return;
-    const available=availableRentalSlots(listingId,room);
-    room.status=available<=0 ? 'Full / Occupied' : rentalRoomCapacity(room)===1 ? 'Available' : `Available (${available} ${available === 1 ? 'bed' : 'beds'} left)`;
+    syncBedCountStatus(room);
     listing.lastUpdated='Updated just now';
 }
 function makeDueDate(year,monthZero,dueDay) {
@@ -933,7 +1078,11 @@ async function submitTenantAssignment(event) {
     if (!room || !isRoomAvailable(room.status)) {
         showToast('Select an available room to continue.', 'error');return;
     }
-    const payload={listingId:id,roomName,
+    const bedSlot = document.getElementById('tenantBedSlot').value;
+    if (!bedSlot || !displayBedSlots(room).some(b => b.id===bedSlot && b.status==='Available')) {
+        showToast('Choose an available individual bed slot.', 'error'); return;
+    }
+    const payload={listingId:id,roomName,bedSlot,
         tenantName:document.getElementById('tenantFullName').value.trim(),
         phone:document.getElementById('tenantPhone').value.trim(),
         email:document.getElementById('tenantEmail').value.trim(),
@@ -963,16 +1112,20 @@ async function submitTenantAssignment(event) {
             if (availableRentalSlots(id,room)<=0)
                 throw new Error('This room or bedspace is fully assigned.');
             tenantRecords.push({id:crypto.randomUUID(),listing_id:id,room_name:roomName,
+                bed_slot:bedSlot,
                 tenant_name:payload.tenantName,tenant_phone:payload.phone,
                 tenant_email:payload.email,monthly_rent:payload.monthlyRent,
                 start_date:payload.startDate,due_day:payload.dueDay,status:'Active',
                 end_date:null,source_hold_id:payload.holdId});
+            room.beds.find(b=>b.id===bedSlot).status='Occupied';
             if (payload.holdId) {
                 const hold=visitationsList.find(h=>h.id===payload.holdId);
                 if (hold) hold.status='Rented';
-                if (activeUserHold?.id===payload.holdId) {
-                    activeUserHold.status='Rented';
-                    localStorage.setItem('homebound-active-hold',JSON.stringify(activeUserHold));
+                const studentHold=studentHolds.find(h=>h.id===payload.holdId);
+                if (studentHold) {
+                    studentHold.status='Rented';
+                    studentHold.statusUpdatedAt=new Date().toISOString();
+                    saveStudentHolds();
                     refreshHoldBanner();
                 }
             }
@@ -999,6 +1152,9 @@ async function endTenantAssignment(tenancyId) {
             await Promise.all([loadListings(),loadOwnerRentData()]);
         } else {
             tenant.status='Ended';tenant.end_date=currentPhilippineDate();
+            const room = dormsData.find(d=>d.id===tenant.listing_id)?.rooms.find(r=>r.name===tenant.room_name);
+            const bed = room?.beds?.find(b=>b.id===tenant.bed_slot);
+            if (bed) bed.status='Available';
             rentRecords=rentRecords.filter(r=>r.tenancy_id!==tenant.id ||
                 r.paid_at || r.due_date<=tenant.end_date);
             updateDemoRoomOccupancy(tenant.listing_id,tenant.room_name);
@@ -1083,7 +1239,22 @@ async function updateVisitStatus(idx, newStatus) {
             await loadOwnerHolds();
         } else {
             hold.status = newStatus;
+            const storedHold=studentHolds.find(h=>h.id===hold.id);
+            if (storedHold) {
+                storedHold.status=newStatus;
+                storedHold.statusUpdatedAt=new Date().toISOString();
+                saveStudentHolds();
+                refreshHoldBanner();
+            }
+            const conv = demoConversations.find(c=>c.id===hold.conversationId);
+            if (conv) {
+                conv.messages.push({id:crypto.randomUUID(),sender:'system',
+                    body:`Homebound update: Your visitation request for ${hold.roomName || hold.room_name} has been ${newStatus === 'Confirmed Visit' ? 'APPROVED' : 'DECLINED'} by the owner.`,
+                    created_at:new Date().toISOString()});
+                conv.updatedAt=new Date().toISOString();
+            }
             renderAdminTables();
+            pollStudentInbox();
         }
         refreshDashboardStats();
         showToast(`Visitation marked as ${newStatus}.`, 'success');
@@ -1150,6 +1321,18 @@ function renderAdminListings() {
                     ${escHtml(d.rooms.some(r => isRoomAvailable(r.status)) ? 'Available' : 'Full / Occupied')}
                 </button>
             </div>
+            <div class="space-y-2 border-t border-slate-100 pt-3">
+               ${d.rooms.map(r => `<div class="rounded-lg bg-slate-50 border border-slate-200 p-3">
+                 <div class="flex justify-between gap-2 mb-2"><strong class="text-xs">${escHtml(r.name)}</strong>
+                   <span class="text-[11px] font-semibold text-brand-700">${displayBedSlots(r).filter(b=>b.status==='Available').length} / ${displayBedSlots(r).length} available</span></div>
+                 <div class="flex gap-2 flex-wrap">${displayBedSlots(r).map(b => `<button type="button"
+                    ${b.status==='Occupied'?'disabled title="Occupied by an active tenant"':''}
+                    onclick="toggleBedAvailability(${bedActionParams(d.id,r.name,b.id)})"
+                    aria-pressed="${b.status==='Unavailable'}"
+                    class="rounded-lg px-3 py-2 text-[11px] font-semibold border ${b.status==='Occupied'?'bg-slate-300 text-slate-600 cursor-not-allowed':b.status==='Available'?'bg-brand-50 border-brand-300 text-brand-800 hover:bg-brand-100':'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'}">
+                    ${escHtml(b.id.replace('bed-','Bed '))}: ${escHtml(b.status)}</button>`).join('')}</div>
+               </div>`).join('')}
+            </div>
             <div class="flex gap-2 text-xs">
                 <button onclick="openTenantAssignmentModal(null,'${validListingId(d.id) ? d.id : ''}')" class="bg-brand-50 border border-brand-200 text-brand-800 rounded-lg px-3 py-2 font-bold">Assign Tenant</button>
                 <button onclick="openEditListingModal('${validListingId(d.id) ? d.id : ''}')" class="bg-slate-100 border border-slate-200 text-slate-700 rounded-lg px-3 py-2 font-bold">Edit Property & Rooms</button>
@@ -1157,6 +1340,27 @@ function renderAdminListings() {
             </div>
         </div>`;
     }).join('');
+}
+
+async function toggleBedAvailability(listingId, roomName, bedSlot) {
+    const listing = getOwnerListings().find(d=>d.id===listingId);
+    const room = listing?.rooms.find(r=>r.name===roomName);
+    const bed = displayBedSlots(room).find(b=>b.id===bedSlot);
+    if (!bed || bed.status==='Occupied') {
+        showToast('Occupied beds can only be reopened by ending the tenancy.', 'error'); return;
+    }
+    const available = bed.status !== 'Available';
+    try {
+        if (HomeboundStore.configured) {
+            await HomeboundStore.setBedAvailable(listingId,roomName,bedSlot,available);
+            await loadListings();
+        } else {
+            bed.status=available?'Available':'Unavailable';
+            syncBedCountStatus(room);
+            refreshListingViews();
+        }
+        showToast(`${bedSlot.replace('bed-','Bed ')} ${available?'is available':'has been blocked'}.`, 'success');
+    } catch(err) { showToast(`Bed availability not updated: ${err.message}`, 'error'); }
 }
 
 async function toggleDormAvailability(dormIndex) {
@@ -1171,7 +1375,10 @@ async function toggleDormAvailability(dormIndex) {
     }
     const next = JSON.parse(JSON.stringify(current));
     const hasAvailable = next.rooms.some(r => isRoomAvailable(r.status));
-    next.rooms.forEach(r => { r.status = hasAvailable ? 'Full / Occupied' : 'Available'; });
+    next.rooms.forEach(r => {
+        r.beds=displayBedSlots(r).map(b => ({...b,status:hasAvailable?'Unavailable':'Available'}));
+        syncBedCountStatus(r);
+    });
     next.lastUpdated = 'Updated just now';
     try {
         const saved = HomeboundStore.configured ? await HomeboundStore.update(next) : next;
@@ -1181,6 +1388,27 @@ async function toggleDormAvailability(dormIndex) {
     } catch (err) {
         showToast(`Availability update not saved: ${err.message}`, 'error');
     }
+}
+
+// Refresh occupied/available states in an open editor when Supabase reports
+// a changed listing. Preserve unsaved names, prices, and notes.
+function reconcileOpenListingEditor() {
+    if (!editingListingId || document.getElementById('modalListingEditor').classList.contains('hidden')) return;
+    const latest=dormsData.find(d=>d.id===editingListingId);
+    if (!latest) return;
+    document.querySelectorAll('.listing-room-form').forEach(el=>{
+        const room=latest.rooms.find(r=>r.name===el.dataset.originalRoomName);
+        if (!room) return;
+        const serverBeds=displayBedSlots(room);
+        if (serverBeds.length !== el.bedSlots.length) return;
+        let changed=false;
+        for (let i=0;i<serverBeds.length;i++) {
+            if (el.bedSlots[i].status!==serverBeds[i].status) {
+                el.bedSlots[i].status=serverBeds[i].status;changed=true;
+            }
+        }
+        if (changed) renderRoomEditorBedSlots(Number(el.id.replace('editorRoom-','')));
+    });
 }
 
 function openNewListingModal() {
@@ -1194,8 +1422,10 @@ function openNewListingModal() {
     document.getElementById('listingEditorTitle').textContent = 'Add New Property Listing';
     document.getElementById('listingOwner').value = activeOwner?.name || '';
     setZoneImages('listingMainDrop', [], true);
+    clearListingPin();
     addListingRoom();
     document.getElementById('modalListingEditor').classList.remove('hidden');
+    initializeListingPinMap();
 }
 
 function openEditListingModal(id) {
@@ -1211,6 +1441,10 @@ function openEditListingModal(id) {
         listingOwner: d.ownerName, listingPhone: d.ownerPhone, listingNote: d.note };
     for (const [id,value] of Object.entries(fields)) document.getElementById(id).value = value ?? '';
     setZoneImages('listingMainDrop', d.mainImage ? [d.mainImage] : [], true);
+    if (Number.isFinite(d.lat) && Number.isFinite(d.lng)) {
+        setListingPin(d.lat,d.lng);
+        initializeListingPinMap();
+    }
     document.getElementById('listingRoomEditor').innerHTML = '';
     roomEditorSerial = 0;
     d.rooms.forEach(room => addListingRoom(room));
@@ -1222,9 +1456,11 @@ function addListingRoom(room = {}) {
     const el = document.createElement('div');
     el.id = `editorRoom-${index}`;
     el.dataset.roomStatus = room.status || 'Available';
+    el.dataset.originalRoomName = room.name || '';
     el.className = 'listing-room-form bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3';
     const oldAmenities = Array.isArray(room.amenities) ? room.amenities : [];
     const customAmenities = oldAmenities.filter(a => !ROOM_AMENITIES.includes(a));
+    el.bedSlots = displayBedSlots(room).map(b=>({...b}));
     el.innerHTML = `<div class="flex items-center justify-between">
         <strong class="text-slate-800">Room / Unit ${index}</strong>
         <button type="button" onclick="removeListingRoom(${index})" class="text-rose-700 font-semibold">Remove room</button>
@@ -1232,8 +1468,12 @@ function addListingRoom(room = {}) {
       <div class="grid sm:grid-cols-2 gap-3">
         <label class="font-semibold">Room Name *<input class="input-editor room-name" required value="${escHtml(room.name || '')}" placeholder="Room 101 - Twin Sharing"></label>
         <label class="font-semibold">Monthly Price (PHP) *<input class="input-editor room-price price-no-spinner" type="number" min="0" step="1" required value="${Number(room.price || 0)}"></label>
-        <label class="font-semibold">Capacity *<input class="input-editor room-capacity" required value="${escHtml(room.capacity || '')}" placeholder="4 Bedspaces"></label>
+        <label class="font-semibold">Total Bed Capacity *<input class="input-editor room-capacity price-no-spinner" type="number" min="1" max="100" step="1" required value="${el.bedSlots.length}" oninput="regenerateRoomBedSlots(${index},this)"></label>
         <label class="font-semibold sm:col-span-2">Additional Notes (optional)<textarea class="input-editor room-note" maxlength="600" rows="2" placeholder="Bathroom details, house rules, allowed occupants...">${escHtml(room.note || '')}</textarea></label>
+      </div>
+      <div><strong class="block font-semibold mb-2">Individual Bed Slots</strong>
+         <p class="text-[11px] text-slate-500 mb-2">Each bed is separate. Available/Blocked can be changed; occupied beds are locked to their tenants.</p>
+         <div id="editorRoomBeds-${index}" class="flex flex-wrap gap-2"></div>
       </div>
       <div><strong class="block font-semibold mb-2">Room Amenities</strong>
         <div class="room-amenity-list grid grid-cols-2 sm:grid-cols-3 gap-2">${ROOM_AMENITIES.map(a => `<label class="flex items-center gap-2 text-xs"><input type="checkbox" class="room-amenity-checkbox accent-green-600" value="${escHtml(a)}" ${oldAmenities.includes(a) ? 'checked' : ''}><span>${escHtml(a)}</span></label>`).join('')}</div>
@@ -1250,6 +1490,34 @@ function addListingRoom(room = {}) {
       </div>`;
     container.appendChild(el);
     setZoneImages(`roomDrop-${index}`, room.images || [], false);
+    renderRoomEditorBedSlots(index);
+}
+function renderRoomEditorBedSlots(index) {
+    const el=document.getElementById(`editorRoom-${index}`);
+    const list=document.getElementById(`editorRoomBeds-${index}`);
+    if (!el || !list) return;
+    list.innerHTML=el.bedSlots.map((b,i)=>`<button type="button" ${b.status==='Occupied'?'disabled title="End tenancy to free this bed"':''}
+      onclick="toggleRoomEditorBed(${index},${i})"
+      class="px-3 py-2 rounded-lg border text-[11px] font-semibold ${b.status==='Occupied'?'bg-slate-200 border-slate-300 text-slate-600 cursor-not-allowed':b.status==='Available'?'bg-brand-50 border-brand-200 text-brand-800':'bg-amber-50 border-amber-200 text-amber-900'}">
+      Bed ${i+1}: ${escHtml(b.status)}</button>`).join('');
+}
+function toggleRoomEditorBed(index,slotIndex) {
+    const el=document.getElementById(`editorRoom-${index}`);
+    const bed=el?.bedSlots?.[slotIndex];
+    if (!bed || bed.status==='Occupied') return;
+    bed.status=bed.status==='Available'?'Unavailable':'Available';
+    renderRoomEditorBedSlots(index);
+}
+function regenerateRoomBedSlots(index,input) {
+    const el=document.getElementById(`editorRoom-${index}`);
+    const total=Number(input.value);
+    if (!Number.isInteger(total) || total<1 || total>100) return;
+    if (el.bedSlots.slice(total).some(b=>b.status==='Occupied')) {
+        showToast('End active tenancies before reducing the capacity below an occupied bed.', 'error');
+        input.value=el.bedSlots.length;return;
+    }
+    el.bedSlots=Array.from({length:total},(_,i)=>el.bedSlots[i] || {id:`bed-${i+1}`,status:'Available'});
+    renderRoomEditorBedSlots(index);
 }
 
 function removeListingRoom(index) {
@@ -1284,10 +1552,17 @@ async function saveListing(event) {
             if (!priceText || !Number.isInteger(price) || price < 0) throw new Error('Room rates must be whole peso amounts.');
             const amenities = [...el.querySelectorAll('.room-amenity-checkbox:checked')].map(input => input.value)
                 .concat([...el.querySelectorAll('.custom-amenity')].map(input => input.value));
-            const result = { name: read('room-name'), price, capacity: read('room-capacity'),
-                status: el.dataset.roomStatus || 'Available', note: read('room-note'),
+            const totalCapacity = Number(read('room-capacity'));
+            if (!Number.isInteger(totalCapacity) || totalCapacity < 1 || totalCapacity > 100)
+                throw new Error('Each room needs a total bed capacity from 1 to 100.');
+            const beds=el.bedSlots.map(b=>({...b}));
+            if (beds.length !== totalCapacity) throw new Error('Room bed slots do not match the capacity.');
+            const result = { name: read('room-name'), price,
+                capacity: `${totalCapacity} ${totalCapacity===1?'Bedspace':'Bedspaces'}`,
+                totalCapacity, beds, note: read('room-note'),
                 amenities, zone: el.querySelector('.image-dropzone') };
-            if (!result.name || !result.capacity) throw new Error('Every room needs a name and capacity.');
+            syncBedCountStatus(result);
+            if (!result.name) throw new Error('Every room needs a name and capacity.');
             return result;
         });
         if (new Set(prepared.map(r => r.name.toLowerCase())).size !== prepared.length)
@@ -1295,20 +1570,23 @@ async function saveListing(event) {
         if (!field('listingTitle') || !field('listingOwner') || !field('listingLocation'))
             throw new Error('Enter property title, owner and full location.');
         button.disabled = true; button.textContent = 'Saving…';
+        const imageWarnings = [];
         const rooms = [];
         for (const data of prepared) {
-            const images = await collectZoneImages(data.zone);
+            const images = await collectZoneImages(data.zone,imageWarnings);
             const {zone, ...room} = data;
             rooms.push({...room, images});
         }
-        const mainImages = await collectZoneImages(document.getElementById('listingMainDrop'));
+        const mainImages = await collectZoneImages(document.getElementById('listingMainDrop'),imageWarnings);
         const prices = rooms.map(r => r.price);
         const minPrice = Math.min(...prices), maxPrice = Math.max(...prices);
         const old = editingListingId ? dormsData.find(d => d.id === editingListingId) : null;
         const payload = {
             title: field('listingTitle'), type: field('listingType'),
             locationZone: field('listingLocation'), distance: field('listingDistance'),
-            note: field('listingNote'), lat: old?.lat ?? null, lng: old?.lng ?? null,
+            note: field('listingNote'),
+            lat: listingDraftCoordinates?.lat ?? null,
+            lng: listingDraftCoordinates?.lng ?? null,
             ownerName: field('listingOwner'), ownerPhone: field('listingPhone'),
             mainImage: mainImages[0] || rooms[0].images[0] || '',
             rooms, minPrice, maxPrice,
@@ -1328,7 +1606,9 @@ async function saveListing(event) {
         closeModal('modalListingEditor');
         refreshListingViews();
         refreshDashboardStats();
-        showToast('Property and room details saved successfully.', 'success');
+        if (imageWarnings.length) {
+            showToast(`Listing saved, but ${imageWarnings.length} photo(s) could not upload. Edit the listing to retry. ${imageWarnings[0]}`, 'error');
+        } else showToast('Property, bed slots and room details saved successfully.', 'success');
     } catch (err) {
         showToast(`Could not save listing: ${err.message}`, 'error');
     } finally { button.disabled = false; button.textContent = 'Save Listing'; }
@@ -1383,42 +1663,112 @@ function getOwnerHoldList() {
     return HomeboundStore.configured ? ownerHolds : visitationsList;
 }
 function lookupPropertyName(id) { return dormsData.find(d => d.id === id)?.title || 'Property'; }
+const STUDENT_HOLDS_KEY='homebound-student-holds';
+const DISMISSED_HOLDS_KEY='homebound-hidden-hold-statuses';
+function saveStudentHolds() {
+    localStorage.setItem(STUDENT_HOLDS_KEY,JSON.stringify(studentHolds));
+    // Preserve most recent single-hold value for compatibility with older tabs.
+    if (studentHolds[0]) localStorage.setItem('homebound-active-hold',JSON.stringify(studentHolds[0]));
+}
 function restoreActiveHold() {
     try {
-        const hold = JSON.parse(localStorage.getItem('homebound-active-hold') || 'null');
-        if (hold && hold.id && hold.token) activeUserHold = hold;
-    } catch (_) { localStorage.removeItem('homebound-active-hold'); }
+        const records=JSON.parse(localStorage.getItem(STUDENT_HOLDS_KEY) || 'null');
+        const legacy=JSON.parse(localStorage.getItem('homebound-active-hold') || 'null');
+        hiddenHoldStatuses=JSON.parse(localStorage.getItem(DISMISSED_HOLDS_KEY) || '{}') || {};
+        const source=Array.isArray(records) ? records : (legacy ? [legacy] : []);
+        const ids=new Set();
+        studentHolds=source.filter(h=>h?.id && h?.token && !ids.has(h.id) && ids.add(h.id));
+        activeUserHold=studentHolds[0] || null;
+        if (studentHolds.length) saveStudentHolds();
+    } catch (err) {
+        console.warn('Could not restore saved hold requests:',err);
+        studentHolds=[];activeUserHold=null;hiddenHoldStatuses={};
+    }
     refreshHoldBanner();
-    if (HomeboundStore.configured && activeUserHold) refreshActiveHold();
+    if (HomeboundStore.configured && studentHolds.length) refreshActiveHold();
+}
+function holdStatusLabel(status) {
+    return ({'Pending Approval':'Pending owner review','Confirmed Visit':'Approved',
+        'Declined':'Declined','Cancelled by Student':'Cancelled','Expired':'Expired','Rented':'Rented'})[status] || status || 'Pending';
+}
+function holdStatusColor(status) {
+    return status==='Confirmed Visit' || status==='Rented' ? 'text-green-700' :
+        status==='Declined' || status==='Expired' ? 'text-rose-700' : 'text-amber-800';
+}
+function renderStudentHoldList() {
+    const list=document.getElementById('studentHoldList');
+    if (!list) return;
+    list.innerHTML=studentHolds.map(h=>`<button type="button" onclick="selectStudentHold(${bedActionParams(h.id)})"
+      class="block w-full text-left rounded-lg border p-2 text-xs ${activeUserHold?.id===h.id?'border-green-500 bg-green-50':'border-slate-200 hover:bg-slate-50'}">
+      <span class="font-bold block">${escHtml(h.dormTitle || lookupPropertyName(h.dormId))}</span>
+      <span class="block text-slate-600">${escHtml(h.roomName)} · ${escHtml(h.visitDate)} ${escHtml(formatVisitTime(h.visitTime))}</span>
+      <span class="font-bold ${holdStatusColor(h.status)}">${escHtml(holdStatusLabel(h.status))}</span>
+    </button>`).join('');
+    const hold=activeUserHold;
+    if (!hold) return;
+    const status=hold.status || 'Pending Approval';
+    const confirmed=status==='Confirmed Visit';
+    const rented=status==='Rented';
+    document.getElementById('holdConfirmationTitle').textContent='Your Hold Requests';
+    document.getElementById('holdRequestStatus').textContent=`Selected: ${holdStatusLabel(status)}`;
+    document.getElementById('holdRequestDescription').textContent=rented
+      ? 'The landlord has recorded your rental. Contact them about your agreement and payment instructions.'
+      : confirmed ? 'Your visitation was approved. Please attend at the agreed date and time.'
+      : status==='Declined' ? 'The owner declined this request. You can submit another request or message the owner.'
+      : status==='Cancelled by Student' ? 'You cancelled this request. Your other requests remain unchanged.'
+      : status==='Expired' ? 'The request period has ended. You may submit a new request.'
+      : 'Your visit request has been sent to the owner for review.';
+    document.getElementById('cancelHoldButton').classList.toggle('hidden',!['Pending Approval','Confirmed Visit'].includes(status));
 }
 function refreshHoldBanner() {
-    const banner = document.getElementById('activeHoldBanner');
-    if (activeUserHold && Date.now() - new Date(activeUserHold.timestamp).getTime() > 86400000 && activeUserHold.status === 'Pending Approval') {
-        activeUserHold.status = 'Expired';
+    const banner=document.getElementById('activeHoldBanner');
+    if (!banner) return;
+    for (const hold of studentHolds) {
+        if (!HomeboundStore.configured && hold.status==='Pending Approval' && hold.timestamp &&
+            Date.now()-new Date(hold.timestamp).getTime()>86400000) {
+            hold.status='Expired';
+        }
     }
-    if (!activeUserHold || ['Declined','Cancelled by Student','Expired'].includes(activeUserHold.status)) {
-        banner.classList.add('hidden'); banner.classList.remove('flex'); return;
+    const visible=studentHolds.filter(h=>hiddenHoldStatuses[h.id] !== h.status);
+    if (!visible.length || currentPortal==='owner') {
+        banner.classList.add('hidden');banner.classList.remove('flex');
+    } else {
+        const top=visible[0];
+        document.getElementById('holdDormName').textContent=top.dormTitle || lookupPropertyName(top.dormId);
+        document.getElementById('holdBannerSummary').textContent=`· ${holdStatusLabel(top.status)}${visible.length>1?` · ${visible.length} updates`:''}`;
+        banner.classList.remove('hidden');banner.classList.add('flex');
     }
-    document.getElementById('holdDormName').textContent = activeUserHold.dormTitle;
-    document.getElementById('holdRequestStatus').textContent = `Status: ${activeUserHold.status}`;
-    const rented = activeUserHold.status === 'Rented';
-    document.getElementById('holdConfirmationTitle').textContent = rented ? 'Rental Assignment Recorded' : 'Hold Request Submitted';
-    document.getElementById('holdRequestDescription').textContent = rented
-        ? 'Your landlord has recorded your room rental. Contact the owner directly for your agreement and payment instructions.'
-        : 'Your visit and 24-hour hold request is recorded. The owner can review your preferred visit details.';
-    document.getElementById('cancelHoldButton').classList.toggle('hidden',rented);
-    banner.classList.remove('hidden'); banner.classList.add('flex');
+    if (studentHolds.length) renderStudentHoldList();
+}
+function dismissHoldBanner() {
+    // Dismiss notices for their current statuses. A later approval/decline
+    // or a newly submitted request will become visible automatically.
+    for (const h of studentHolds) hiddenHoldStatuses[h.id]=h.status;
+    localStorage.setItem(DISMISSED_HOLDS_KEY,JSON.stringify(hiddenHoldStatuses));
+    refreshHoldBanner();
 }
 async function refreshActiveHold() {
-    if (!activeUserHold || !HomeboundStore.configured) return;
+    if (!studentHolds.length || !HomeboundStore.configured || holdStatusPollBusy) return;
+    holdStatusPollBusy=true;
+    let changed=false;
     try {
-        const result = await HomeboundStore.getHold(activeUserHold.id, activeUserHold.token);
-        if (!result) return;
-        activeUserHold.status = result.status;
-        localStorage.setItem('homebound-active-hold', JSON.stringify(activeUserHold));
-        refreshHoldBanner();
-    } catch (err) { console.warn('Could not refresh hold status:', err.message); }
+        // Old, completed requests are retained in history but do not need polling forever.
+        const candidates=studentHolds.filter(h=>['Pending Approval','Confirmed Visit'].includes(h.status)).slice(0,30);
+        const results=await Promise.allSettled(candidates.map(h=>HomeboundStore.getHold(h.id,h.token)));
+        results.forEach((res,i)=>{
+            if (res.status!=='fulfilled' || !res.value) return;
+            const hold=candidates[i];
+            if (hold.status!==res.value.status) {
+                hold.status=res.value.status;
+                hold.statusUpdatedAt=new Date().toISOString();
+                changed=true;
+            }
+        });
+        if (changed) saveStudentHolds();
+    } catch (err) { console.warn('Could not refresh hold statuses:',err.message); }
+    finally { holdStatusPollBusy=false;refreshHoldBanner(); }
 }
+
 async function loadOwnerHolds() {
     if (HomeboundStore.configured) {
         if (!activeOwner) return;
@@ -1517,12 +1867,93 @@ function fileAsDataUrl(file) {
         reader.readAsDataURL(file);
     });
 }
-async function collectZoneImages(zone) {
+async function collectZoneImages(zone, warnings = []) {
     const originals = [...(zone.existingImages || [])];
     for (const file of (zone.pendingFiles || [])) {
-        originals.push(HomeboundStore.configured ? await HomeboundStore.uploadImage(file) : await fileAsDataUrl(file));
+        try {
+            const remoteUrl=HomeboundStore.configured ? await HomeboundStore.uploadImage(file) : await fileAsDataUrl(file);
+            originals.push(remoteUrl);
+        } catch (err) {
+            // Photos are optional; network/storage failure must not discard a valid listing.
+            // Do not store blob: preview URLs or data: images as Supabase public URLs.
+            console.warn('Homebound photo upload failed:', err);
+            warnings.push(err.message);
+        }
     }
     return zone.singleImage ? originals.slice(0,1) : originals;
+}
+function readSavedStudentConversations() {
+    const records=[];
+    for (let i=0;i<localStorage.length;i++) {
+        const key=localStorage.key(i);
+        if (!key?.startsWith('homebound-chat-')) continue;
+        const listingId=key.slice('homebound-chat-'.length);
+        try {
+            const row=JSON.parse(localStorage.getItem(key));
+            if (row?.id && row?.token) records.push({listingId,...row});
+        } catch (_) {}
+    }
+    return records;
+}
+function renderStudentInbox() {
+    const floating=document.getElementById('studentInboxFloating');
+    if (!floating) return;
+    floating.classList.toggle('hidden',currentPortal!=='student' || !studentInboxRecords.some(r=>r.hasOwnerReply));
+    const total=studentInboxRecords.reduce((sum,r)=>sum+r.unread,0);
+    const badge=document.getElementById('studentUnreadBadge');
+    badge.classList.toggle('hidden',!total);
+    badge.textContent=String(Math.min(total,99));
+    document.getElementById('studentInboxList').innerHTML=studentInboxRecords.map(r =>
+        `<button type="button" onclick="openStudentConversation(${bedActionParams(r.listingId)})"
+          class="flex items-center justify-between gap-2 w-full text-left border border-slate-200 hover:bg-brand-50 rounded-lg p-2">
+            <span class="font-semibold">${escHtml(lookupPropertyName(r.listingId))}</span>
+            ${r.unread ? `<span class="bg-rose-600 text-white text-[10px] rounded-full px-2 py-1">${r.unread} new</span>` : '<span class="text-slate-500 text-[10px]">Open chat</span>'}
+          </button>`).join('');
+}
+async function pollStudentInbox() {
+    if (studentInboxBusy) return;
+    studentInboxBusy=true;
+    try {
+        const saved=readSavedStudentConversations();
+        const result=[];
+        for (const record of saved) {
+            try {
+                const messages=HomeboundStore.configured
+                    ? await HomeboundStore.studentMessages(record.id,record.token)
+                    : (demoConversations.find(c=>c.id===record.id)?.messages || []);
+                const seen=new Set(record.seenOwnerIds || []);
+                result.push({ ...record,
+                    hasOwnerReply:(messages||[]).some(m=>m.sender!=='student'),
+                    unread:(messages||[]).filter(m => m.sender!=='student' && !seen.has(m.id)).length });
+            } catch (err) { console.warn('Unable to refresh one student conversation',err.message); }
+        }
+        studentInboxRecords=result;
+        renderStudentInbox();
+    } finally { studentInboxBusy=false; }
+}
+function toggleStudentInbox() {
+    const panel=document.getElementById('studentInboxPanel');
+    panel.classList.toggle('hidden');
+    if (!panel.classList.contains('hidden')) pollStudentInbox();
+}
+async function openStudentConversation(listingId) {
+    const dorm=dormsData.find(d=>d.id===listingId);
+    if (!dorm) { showToast('This listing is no longer available.', 'error'); return; }
+    document.getElementById('studentInboxPanel').classList.add('hidden');
+    activeDormViewing=dorm;
+    selectedRoomIndex=0;
+    await openLiveChat(dorm.ownerName);
+}
+function markStudentChatSeen(messages) {
+    if (!studentChatListingId || !studentConversationId) return;
+    const key=`homebound-chat-${studentChatListingId}`;
+    try {
+        const saved=JSON.parse(localStorage.getItem(key) || '{}') || {};
+        const seen=[...new Set([...(saved.seenOwnerIds || []),...messages.filter(m=>m.sender!=='student').map(m=>m.id)])].slice(-200);
+        localStorage.setItem(key,JSON.stringify({id:studentConversationId,token:studentChatToken,seenOwnerIds:seen}));
+        const record=studentInboxRecords.find(r=>r.listingId===studentChatListingId);
+        if (record) {record.unread=0;record.seenOwnerIds=seen;renderStudentInbox();}
+    } catch (_) {}
 }
 async function refreshStudentChat() {
     if (!studentChatListingId || document.getElementById('liveChatDrawer').classList.contains('hidden')) return;
@@ -1536,6 +1967,7 @@ async function refreshStudentChat() {
         const box = document.getElementById('liveChatMessages');
         box.innerHTML = messages.length ? '' : '<p class="text-center text-slate-400 text-xs">Ask a question about this property to start a conversation.</p>';
         messages.forEach(m => appendChatMessage(m.body,m.sender));
+        if (currentPortal==='student') markStudentChatSeen(messages);
     } catch (err) { console.warn('Chat refresh failed:',err.message); }
 }
 async function loadOwnerInbox() {
@@ -1590,6 +2022,7 @@ async function sendOwnerReply(e) {
         await openOwnerConversation(ownerConversationId);
         await loadOwnerInbox();
         refreshStudentChat();
+        pollStudentInbox();
     } catch (err) { showToast(`Reply not sent: ${err.message}`, 'error'); }
     finally { input.disabled=false; }
 }
@@ -1609,8 +2042,9 @@ function updateAIAssistant() {
 function refreshDashboardStats() {
     const listings = getOwnerListings();
     const rooms = listings.flatMap(d => d.rooms);
-    const available = rooms.filter(r => isRoomAvailable(r.status)).length;
-    document.getElementById('statOccupancy').textContent = `${available} / ${rooms.length}`;
+    const available = rooms.reduce((sum,r)=>sum+displayBedSlots(r).filter(b=>b.status==='Available').length,0);
+    const totalBeds=rooms.reduce((sum,r)=>sum+displayBedSlots(r).length,0);
+    document.getElementById('statOccupancy').textContent = `${available} / ${totalBeds}`;
     const total = tenantRecords.filter(t => t.status === 'Active').reduce((sum,t) => sum + Number(t.monthly_rent || 0),0);
     document.getElementById('statRevenue').textContent = `₱${total.toLocaleString()}`;
     renderAdminTables();

@@ -1,5 +1,7 @@
 -- Homebound schema / migration. Run in Supabase SQL Editor with administrator privileges.
 -- Safe to run on an existing project containing the previous Homebound tables.
+BEGIN;
+
 create extension if not exists pgcrypto;
 
 create table if not exists public.landlords (
@@ -568,3 +570,346 @@ do $$ begin
     alter publication supabase_realtime add table public.rent_payments;
   end if;
 end $$;
+
+-- ============================================================================
+-- HOMEBOUND UPDATE: per-bed availability and student visitation notifications
+-- Re-runnable migration. No existing listing, payment, hold, or chat records deleted.
+-- ============================================================================
+
+-- Each active tenant receives a stable slot within a room.
+alter table public.tenancies add column if not exists bed_slot text;
+
+-- Assign individual slots to pre-existing active rentals, retaining their records.
+do $$
+declare t record; n integer;
+begin
+  for t in select id, listing_id, room_name from public.tenancies
+      where status='Active' and bed_slot is null order by created_at, id
+  loop
+    select i into n from generate_series(1,100) i
+    where not exists (select 1 from public.tenancies other
+      where other.status='Active' and other.listing_id=t.listing_id
+        and other.room_name=t.room_name and other.bed_slot=('bed-'||i))
+    order by i limit 1;
+    if n is null then raise exception 'More than 100 occupied slots in a room.'; end if;
+    update public.tenancies set bed_slot=('bed-'||n) where id=t.id;
+  end loop;
+end $$;
+create unique index if not exists tenancies_one_active_bed
+  on public.tenancies(listing_id,room_name,bed_slot)
+  where status='Active' and bed_slot is not null;
+
+-- Backfill a durable bed array for old listings without a bed array. Existing
+-- room capacity and any pre-existing blocked beds are preserved.
+create or replace function public.homebound_migrate_room_beds(p_listing_id uuid,p_rooms jsonb)
+returns jsonb language plpgsql set search_path = '' as $$
+declare room jsonb; bed jsonb; beds jsonb; output jsonb := '[]'::jsonb;
+    capacity integer; n integer; free_count integer; old_free integer;
+    status text; existing jsonb; occupied boolean; legacy text; available_allocated integer;
+begin
+  for room in select value from jsonb_array_elements(coalesce(p_rooms,'[]'::jsonb)) loop
+    capacity := greatest(1,least(100,coalesce(nullif(room->>'totalCapacity','')::integer,
+                 public.homebound_room_slots(room->>'capacity'))));
+    existing := coalesce(room->'beds','[]'::jsonb);
+    if jsonb_typeof(existing) <> 'array' then existing := '[]'::jsonb; end if;
+    -- Never silently discard a bed; editing later must explicitly respect occupancy.
+    if jsonb_array_length(existing) > capacity then capacity := jsonb_array_length(existing); end if;
+    if exists (select 1 from public.tenancies t where t.listing_id=p_listing_id
+        and t.room_name=room->>'name' and t.status='Active'
+        and t.bed_slot ~ '^bed-[0-9]+$'
+        and substring(t.bed_slot from 5)::integer > capacity) then
+      raise exception 'Occupied bed exceeds the room capacity for "%".',room->>'name';
+    end if;
+    legacy := coalesce(room->>'status','Available');
+    old_free := capacity;
+    if legacy !~* '^Available' then old_free := 0;
+    elsif legacy ~* '([0-9]+) beds? left' then
+      old_free := least(capacity,substring(legacy from '([0-9]+) beds? left')::integer);
+    end if;
+    beds := '[]'::jsonb; free_count := 0; available_allocated := 0;
+    for n in 1..capacity loop
+      select value into bed from jsonb_array_elements(existing) where value->>'id'='bed-'||n limit 1;
+      occupied := exists (select 1 from public.tenancies t where t.listing_id=p_listing_id
+        and t.room_name=room->>'name' and t.status='Active' and t.bed_slot='bed-'||n);
+      status := case when occupied then 'Occupied'
+        when bed->>'status'='Unavailable' then 'Unavailable'
+        when bed->>'status'='Available' then 'Available'
+        when available_allocated < old_free then 'Available'
+        else 'Unavailable' end;
+      if status='Available' then
+        free_count:=free_count+1;available_allocated:=available_allocated+1;
+      end if;
+      beds := beds || jsonb_build_array(jsonb_build_object('id','bed-'||n,'status',status));
+      bed := null;
+    end loop;
+    room := jsonb_set(room,'{totalCapacity}',to_jsonb(capacity),true);
+    room := jsonb_set(room,'{beds}',beds,true);
+    room := jsonb_set(room,'{status}',to_jsonb(case when free_count=0 then 'Full / Occupied'
+      else format('Available (%s bed%s left)',free_count,case when free_count=1 then '' else 's' end) end),true);
+    output:=output || jsonb_build_array(room);
+  end loop;
+  return output;
+end;
+$$;
+
+update public.listings l set rooms=public.homebound_migrate_room_beds(l.id,l.rooms)
+where exists (select 1 from jsonb_array_elements(l.rooms) r
+  where not (r ? 'beds') or not (r ? 'totalCapacity'));
+
+-- Recalculate one slot and room's public availability without changing others.
+create or replace function public.homebound_apply_bed_status(
+  p_rooms jsonb,p_room_name text,p_bed_slot text,p_status text)
+returns jsonb language plpgsql set search_path = '' as $$
+declare room jsonb; bed jsonb; items jsonb := '[]'::jsonb;
+  updated_beds jsonb; free_count integer; n integer; found_room boolean := false;
+  found_slot boolean := false;
+begin
+  if p_status not in ('Available','Unavailable','Occupied') then
+    raise exception 'Invalid bed status.';
+  end if;
+  for room in select value from jsonb_array_elements(p_rooms) loop
+    if room->>'name'=p_room_name then
+      found_room:=true;updated_beds:='[]'::jsonb;free_count:=0;
+      for bed in select value from jsonb_array_elements(room->'beds') loop
+        if bed->>'id'=p_bed_slot then
+          bed:=jsonb_set(bed,'{status}',to_jsonb(p_status),true);
+          found_slot:=true;
+        end if;
+        if bed->>'status'='Available' then free_count:=free_count+1; end if;
+        updated_beds:=updated_beds || jsonb_build_array(bed);
+      end loop;
+      room:=jsonb_set(room,'{beds}',updated_beds,true);
+      room:=jsonb_set(room,'{status}',to_jsonb(case when free_count=0 then 'Full / Occupied'
+        else format('Available (%s bed%s left)',free_count,
+          case when free_count=1 then '' else 's' end) end),true);
+    end if;
+    items:=items || jsonb_build_array(room);
+  end loop;
+  if not found_room or not found_slot then raise exception 'Bed slot no longer exists.'; end if;
+  return items;
+end;
+$$;
+
+-- Validate edits server-side: no occupied tenant can be lost or made vacant.
+create or replace function public.homebound_protect_occupied_rooms()
+returns trigger language plpgsql set search_path = '' as $$
+declare room jsonb; bed jsonb; slot text; n integer; capacity integer;
+  occupied integer; free_count integer; slot_tenants integer;
+begin
+  for room in select value from jsonb_array_elements(new.rooms) loop
+    capacity:=nullif(room->>'totalCapacity','')::integer;
+    if capacity is null or capacity not between 1 and 100 or
+       coalesce(jsonb_typeof(room->'beds'),'null') <> 'array' or
+       jsonb_array_length(room->'beds') <> capacity then
+      raise exception 'Room "%" must contain exactly its declared bed capacity.',room->>'name';
+    end if;
+    free_count:=0;
+    for n in 1..capacity loop
+      slot:='bed-'||n;
+      select value into bed from jsonb_array_elements(room->'beds') b
+        where b.value->>'id'=slot limit 1;
+      if bed is null then raise exception 'Room "%" is missing slot %.',room->>'name',slot; end if;
+      if bed->>'status' not in ('Available','Unavailable','Occupied') then
+        raise exception 'Invalid bed status in room "%".',room->>'name'; end if;
+      select count(*) into slot_tenants from public.tenancies
+         where listing_id=new.id and room_name=room->>'name'
+           and bed_slot=slot and status='Active';
+      if (bed->>'status'='Occupied') <> (slot_tenants=1) then
+        raise exception 'Bed % in room "%" must match the active tenancy.',slot,room->>'name';
+      end if;
+      if bed->>'status'='Available' then free_count:=free_count+1; end if;
+      bed:=null;
+    end loop;
+    if (free_count > 0) <> (coalesce(room->>'status','') ilike 'Available%') then
+      raise exception 'Room "%" availability does not match its bed slots.',room->>'name';
+    end if;
+  end loop;
+  -- A room with active tenants cannot be removed or renamed.
+  if exists (select 1 from public.tenancies t where t.listing_id=new.id
+      and t.status='Active' and not exists (
+        select 1 from jsonb_array_elements(new.rooms) r
+        where r->>'name'=t.room_name)) then
+    raise exception 'End active tenancies before removing or renaming their room.';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists homebound_occupied_room_guard on public.listings;
+create trigger homebound_occupied_room_guard before insert or update of rooms on public.listings
+for each row execute function public.homebound_protect_occupied_rooms();
+
+-- The owner can block/unblock a VACANT bed only. Occupied slots are immutable
+-- until the tenant is ended. Locking the listing serializes concurrent operations.
+create or replace function public.homebound_set_bed_available(
+ p_listing_id uuid,p_room_name text,p_bed_slot text,p_available boolean)
+returns boolean language plpgsql security definer set search_path = '' as $$
+declare v_owner uuid; v_rooms jsonb; v_current text;
+begin
+  if auth.uid() is null or not exists (select 1 from public.landlords where user_id=auth.uid()) then
+    raise exception 'Approved landlord login required.'; end if;
+  select owner_id,rooms into v_owner,v_rooms from public.listings
+    where id=p_listing_id for update;
+  if v_owner is distinct from auth.uid() then raise exception 'Property access denied.'; end if;
+  select bed->>'status' into v_current
+    from jsonb_array_elements(v_rooms) r
+    cross join lateral jsonb_array_elements(r->'beds') bed
+    where r->>'name'=p_room_name and bed->>'id'=p_bed_slot limit 1;
+  if v_current is null then raise exception 'Bed slot does not exist.'; end if;
+  if v_current='Occupied' or exists (select 1 from public.tenancies
+    where listing_id=p_listing_id and room_name=p_room_name
+      and bed_slot=p_bed_slot and status='Active') then
+    raise exception 'An occupied bed cannot be changed until the tenancy ends.';
+  end if;
+  update public.listings set rooms=public.homebound_apply_bed_status(v_rooms,
+    p_room_name,p_bed_slot,case when p_available then 'Available' else 'Unavailable' end)
+    where id=p_listing_id;
+  return true;
+end;
+$$;
+
+-- Assign a PARTICULAR bed, with one transaction and a listing row lock.
+create or replace function public.homebound_assign_bed(
+  p_listing_id uuid,p_room_name text,p_bed_slot text,
+  p_tenant_name text,p_phone text,p_email text,p_start_date date,
+  p_due_day integer,p_monthly_rent numeric,p_hold_id uuid default null)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare v_owner uuid;v_rooms jsonb;v_state text;v_id uuid;
+begin
+  if auth.uid() is null or not exists (select 1 from public.landlords where user_id=auth.uid()) then
+    raise exception 'Approved landlord login required.'; end if;
+  if length(btrim(coalesce(p_tenant_name,''))) not between 2 and 150
+     or length(btrim(coalesce(p_phone,''))) not between 7 and 35
+     or length(coalesce(p_email,''))>250
+     or p_start_date is null or p_start_date < date '2000-01-01'
+     or p_start_date > current_date+730
+     or p_due_day not between 1 and 31 or p_monthly_rent is null
+     or p_monthly_rent<=0 or p_monthly_rent>10000000 then
+    raise exception 'Please provide valid tenant and rent details.';
+  end if;
+  select owner_id,rooms into v_owner,v_rooms from public.listings
+     where id=p_listing_id for update;
+  if v_owner is distinct from auth.uid() then raise exception 'Property access denied.'; end if;
+  select bed->>'status' into v_state
+    from jsonb_array_elements(v_rooms) r
+    cross join lateral jsonb_array_elements(r->'beds') bed
+    where r->>'name'=p_room_name and bed->>'id'=p_bed_slot limit 1;
+  if v_state is distinct from 'Available' then
+    raise exception 'The selected bed is not available.'; end if;
+  if exists (select 1 from public.tenancies where listing_id=p_listing_id
+    and room_name=p_room_name and bed_slot=p_bed_slot and status='Active') then
+    raise exception 'The selected bed is already rented.'; end if;
+  if p_hold_id is not null and not exists (select 1 from public.hold_requests
+    where id=p_hold_id and listing_id=p_listing_id and room_name=p_room_name
+      and owner_id=auth.uid() and status='Confirmed Visit') then
+    raise exception 'The linked visitation is not confirmed for this room.'; end if;
+  insert into public.tenancies(owner_id,listing_id,room_name,bed_slot,tenant_name,tenant_phone,
+    tenant_email,monthly_rent,start_date,due_day,source_hold_id)
+  values(auth.uid(),p_listing_id,p_room_name,p_bed_slot,btrim(p_tenant_name),
+    btrim(p_phone),btrim(coalesce(p_email,'')),p_monthly_rent,p_start_date,p_due_day,p_hold_id)
+  returning id into v_id;
+  update public.listings set rooms=public.homebound_apply_bed_status(v_rooms,p_room_name,p_bed_slot,'Occupied')
+      where id=p_listing_id;
+  if p_hold_id is not null then
+    update public.hold_requests set status='Rented' where id=p_hold_id;
+  end if;
+  return v_id;
+end;
+$$;
+
+-- Restore ONLY the bed used by an ending tenant and keep historical payments.
+create or replace function public.homebound_end_tenancy(p_tenancy_id uuid)
+returns boolean language plpgsql security definer set search_path = '' as $$
+declare t public.tenancies%rowtype; v_rooms jsonb;
+begin
+  if auth.uid() is null or not exists (select 1 from public.landlords where user_id=auth.uid()) then
+     raise exception 'Approved landlord login required.'; end if;
+  select * into t from public.tenancies where id=p_tenancy_id and owner_id=auth.uid();
+  if not found or t.status<>'Active' then return false; end if;
+  select rooms into v_rooms from public.listings where id=t.listing_id for update;
+  update public.tenancies set status='Ended',end_date=(now() at time zone 'Asia/Manila')::date
+   where id=p_tenancy_id and owner_id=auth.uid() and status='Active';
+  delete from public.rent_payments where tenancy_id=p_tenancy_id and paid_at is null
+    and due_date>(now() at time zone 'Asia/Manila')::date;
+  update public.listings set rooms=public.homebound_apply_bed_status(v_rooms,t.room_name,t.bed_slot,'Available')
+   where id=t.listing_id;
+  return true;
+end;
+$$;
+
+-- Attach a hold to a student-accessible conversation at submission time so an
+-- approval/decline can appear in that exact conversation, even when it is new.
+alter table public.hold_requests add column if not exists chat_conversation_id uuid;
+do $$ begin
+  if not exists(select 1 from pg_constraint where conname='hold_requests_chat_conversation_fk') then
+    alter table public.hold_requests add constraint hold_requests_chat_conversation_fk
+      foreign key(chat_conversation_id) references public.chat_conversations(id) on delete set null;
+  end if;
+end $$;
+
+alter table public.chat_messages drop constraint if exists chat_messages_sender_check;
+alter table public.chat_messages add constraint chat_messages_sender_check
+  check (sender in ('student','owner','system'));
+
+create or replace function public.homebound_create_hold_with_chat(
+  p_listing_id uuid,p_room_name text,p_student_name text,p_student_phone text,
+  p_student_email text,p_visit_date date,p_visit_time time,p_request_token uuid,
+  p_chat_token uuid,p_conversation_id uuid default null)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare v_hold jsonb;v_conv uuid;v_owner uuid;
+begin
+  if p_chat_token is null then raise exception 'Conversation token is required.'; end if;
+  if p_conversation_id is null then
+    select owner_id into v_owner from public.listings where id=p_listing_id;
+    if v_owner is null then raise exception 'Property no longer exists.'; end if;
+    insert into public.chat_conversations(listing_id,owner_id,student_token)
+      values(p_listing_id,v_owner,p_chat_token) returning id into v_conv;
+  else
+    select id into v_conv from public.chat_conversations where id=p_conversation_id
+      and listing_id=p_listing_id and student_token=p_chat_token;
+    if v_conv is null then raise exception 'Conversation access denied.'; end if;
+  end if;
+  v_hold:=public.homebound_create_hold(p_listing_id,p_room_name,p_student_name,p_student_phone,
+    p_student_email,p_visit_date,p_visit_time,p_request_token);
+  update public.hold_requests set chat_conversation_id=v_conv where id=(v_hold->>'id')::uuid;
+  return v_hold || jsonb_build_object('conversationId',v_conv);
+end;
+$$;
+
+create or replace function public.homebound_owner_set_hold_status(p_id uuid,p_status text)
+returns boolean language plpgsql security definer set search_path = '' as $$
+declare h public.hold_requests%rowtype;v_message text;
+begin
+  if p_status not in ('Confirmed Visit','Declined') then
+    raise exception 'Invalid hold status.'; end if;
+  update public.hold_requests set status=p_status
+    where id=p_id and status='Pending Approval' and expires_at>now()
+      and owner_id=auth.uid() and exists
+        (select 1 from public.landlords where user_id=auth.uid())
+    returning * into h;
+  if not found then return false; end if;
+  if h.chat_conversation_id is not null then
+    v_message:=case when p_status='Confirmed Visit' then
+        'Homebound update: Your visitation request for "'||left(h.room_name,150)||'" on '
+        ||h.visit_date::text||' at '||to_char(h.visit_date + h.visit_time,'HH12:MI AM')||' has been APPROVED by the owner.'
+      else 'Homebound update: Your visitation request for "'||left(h.room_name,150)||'" on '
+        ||h.visit_date::text||' has been DECLINED by the owner. Please message the owner to discuss alternatives.' end;
+    insert into public.chat_messages(conversation_id,sender,body)
+        values(h.chat_conversation_id,'system',v_message);
+  end if;
+  return true;
+end;
+$$;
+
+-- Limit callable, privileged functions to the intended roles only.
+revoke all on function public.homebound_migrate_room_beds(uuid,jsonb) from public,anon,authenticated;
+revoke all on function public.homebound_apply_bed_status(jsonb,text,text,text) from public,anon,authenticated;
+revoke all on function public.homebound_set_bed_available(uuid,text,text,boolean) from public,anon,authenticated;
+revoke all on function public.homebound_assign_bed(uuid,text,text,text,text,text,date,integer,numeric,uuid) from public,anon,authenticated;
+revoke all on function public.homebound_create_hold_with_chat(uuid,text,text,text,text,date,time,uuid,uuid,uuid) from public,anon,authenticated;
+grant execute on function public.homebound_set_bed_available(uuid,text,text,boolean) to authenticated;
+grant execute on function public.homebound_assign_bed(uuid,text,text,text,text,text,date,integer,numeric,uuid) to authenticated;
+grant execute on function public.homebound_create_hold_with_chat(uuid,text,text,text,text,date,time,uuid,uuid,uuid) to anon,authenticated;
+-- Retire the old implicit-bed assignment RPC; the client now chooses an exact slot.
+revoke execute on function public.homebound_create_tenancy(uuid,text,text,text,text,date,integer,numeric,uuid) from authenticated;
+
+COMMIT;
