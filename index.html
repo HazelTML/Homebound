@@ -83,15 +83,16 @@
         <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-4">
             <div>
                 <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight">Where comfort meets convenience.</h1>
-                <p class="text-slate-300 text-xs sm:text-sm mt-1">Explore rooms and bedspaces, compare prices, and find your next home.</p>
+                <p class="text-slate-300 text-xs sm:text-sm mt-1">Your next chapter starts with the right space. Find a home that makes every day a little easier.</p>
             </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,220px)_110px] items-end gap-3">
-            <label class="block text-xs font-semibold text-slate-200">Search location or nearby landmark
-                <input id="filterLocation" type="search" oninput="applyFilters()" placeholder="Enter any city, barangay, street, campus or landmark" autocomplete="off"
+            <label class="block text-xs font-semibold text-slate-200">Search location
+                <input id="filterLocation" type="search" oninput="applyFilters()" 
+                placeholder="Enter any street, barangay, campus, or landmark"  autocomplete="on"
                     class="mt-1 w-full bg-white text-slate-900 border border-slate-200 rounded-xl text-sm px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500">
             </label>
-            <label class="block text-xs font-semibold text-slate-200">Monthly budget
+            <label class="block text-xs font-semibold text-slate-200">Search budget
                 <select id="filterPriceRange" onchange="applyFilters()" class="mt-1 w-full bg-white text-slate-900 border border-slate-200 rounded-xl text-sm px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500">
                     <option value="ALL">Any budget</option>
                     <option value="0-3000">Up to ₱3,000</option>
