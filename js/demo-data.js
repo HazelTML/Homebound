@@ -15,7 +15,7 @@ const sampleDormsData = [
         ownerName: "Capt. Rodrigo Santos",
         ownerPhone: "+63 917 555 0192",
         lastUpdated: "Updated 1 hr ago",
-        mainImage: "https://images.unsplash.com/photo-1555854877-bab0e564b8d5?auto=format&fit=crop&w=800&q=80",
+        mainImage: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=400&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=NHwxMjA3fDA%3D",
         rooms: [
             {
                 name: "Room 101 - Aircon Quad Bedspace",
@@ -55,7 +55,7 @@ const sampleDormsData = [
         ownerName: "Mrs. Elena Cruz",
         ownerPhone: "+63 918 222 4910",
         lastUpdated: "Updated 3 hrs ago",
-        mainImage: "https://images.unsplash.com/photo-1595526114035-0d45ed16cfbf?auto=format&fit=crop&w=800&q=80",
+        mainImage: "https://images.unsplash.com/photo-1759898897021-9f706f5768dc?w=400&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=NHwxMjA3fDA%3D",
         rooms: [
             {
                 name: "Room 3A - Non-Aircon 6-Bed Room",
@@ -95,7 +95,7 @@ const sampleDormsData = [
         ownerName: "Engr. Marco Valdes",
         ownerPhone: "+63 920 888 1234",
         lastUpdated: "Updated 30 mins ago",
-        mainImage: "https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?auto=format&fit=crop&w=800&q=80",
+        mainImage: "https://images.unsplash.com/photo-1773936850486-eadf8cf81872?w=400&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=NHwxMjA3fDA%3D",
         rooms: [
             {
                 name: "Unit 402 - Executive Deluxe Studio",
@@ -124,7 +124,7 @@ const sampleDormsData = [
         ownerName: "Dorm Management Corp.",
         ownerPhone: "+63 905 111 7788",
         lastUpdated: "Updated 5 hrs ago",
-        mainImage: "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=800&q=80",
+        mainImage: "https://images.unsplash.com/photo-1554469384-e58fac16e23a?w=400&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=NHwxMjA3fDA%3D",
         rooms: [
             {
                 name: "Room 205 - Twin Aircon Room",
@@ -181,7 +181,7 @@ const sampleDormsData = [
         ownerName: "Metro Residences Inc.",
         ownerPhone: "+63 928 999 0011",
         lastUpdated: "Updated 1 day ago",
-        mainImage: "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=800&q=80",
+        mainImage: "https://images.unsplash.com/photo-1479839672679-a46483c0e7c8?w=400&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=NHwxMjA3fDA%3D",
         rooms: [
             {
                 name: "Studio 12B - Semi Furnished",

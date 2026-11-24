@@ -84,16 +84,15 @@
         <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-4">
             <div>
                 <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight">Where comfort meets convenience.</h1>
-                <p class="text-slate-300 text-xs sm:text-sm mt-1">Your next chapter starts with the right space. Find a home that makes every day a little easier.</p>
+                <p class="text-slate-300 text-xs sm:text-sm mt-1">Explore rooms and bedspaces, compare prices, and find your next home.</p>
             </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,220px)_110px] items-end gap-3">
-            <label class="block text-xs font-semibold text-slate-200">Search location
-                <input id="filterLocation" type="search" oninput="applyFilters()" 
-                placeholder="Enter any street, barangay, campus, or landmark"  autocomplete="on"
+            <label class="block text-xs font-semibold text-slate-200">Search location or nearby landmark
+                <input id="filterLocation" type="search" oninput="applyFilters()" placeholder="Enter any city, barangay, street, campus or landmark" autocomplete="off"
                     class="mt-1 w-full bg-white text-slate-900 border border-slate-200 rounded-xl text-sm px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500">
             </label>
-            <label class="block text-xs font-semibold text-slate-200">Search budget
+            <label class="block text-xs font-semibold text-slate-200">Monthly budget
                 <select id="filterPriceRange" onchange="applyFilters()" class="mt-1 w-full bg-white text-slate-900 border border-slate-200 rounded-xl text-sm px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500">
                     <option value="ALL">Any budget</option>
                     <option value="0-3000">Up to ₱3,000</option>
@@ -291,16 +290,25 @@
                 <div class="flex flex-wrap justify-between gap-2 items-center">
                     <div>
                         <h4 class="font-bold text-slate-900">Tenants & Monthly Rent</h4>
-                        <p class="text-xs text-slate-500 mt-1">Each tenant appears once. The oldest unpaid due is shown first; expand Payment History for every month.</p>
+                        <p class="text-xs text-slate-500 mt-1">Each active or ended tenancy appears once. Expand View Record to see start/end dates, assigned bed, contact details, and payment history.</p>
                     </div>
-                    <label class="text-xs text-slate-600">Show
-                        <select id="paymentStatusFilter" class="border border-slate-300 rounded-md px-2 py-1 ml-1 bg-white" onchange="renderAdminTables()">
-                            <option value="all">All tenants</option>
-                            <option value="pending">Pending dues</option>
-                            <option value="overdue">Overdue dues</option>
-                            <option value="paid">Paid dues</option>
-                        </select>
-                    </label>
+                    <div class="flex flex-wrap gap-2 items-center">
+                        <label class="text-xs text-slate-600">Tenancy
+                            <select id="tenancyStatusFilter" class="border border-slate-300 rounded-md px-2 py-1 ml-1 bg-white" onchange="renderAdminTables()">
+                                <option value="all">Active & Ended</option>
+                                <option value="active">Active only</option>
+                                <option value="ended">Ended only</option>
+                            </select>
+                        </label>
+                        <label class="text-xs text-slate-600">Payments
+                            <select id="paymentStatusFilter" class="border border-slate-300 rounded-md px-2 py-1 ml-1 bg-white" onchange="renderAdminTables()">
+                                <option value="all">All dues</option>
+                                <option value="pending">Pending</option>
+                                <option value="overdue">Overdue</option>
+                                <option value="paid">Paid</option>
+                            </select>
+                        </label>
+                    </div>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="w-full text-left text-xs border-collapse">
@@ -764,8 +772,8 @@
         <div class="sm:col-span-2"><label class="font-semibold">Property Main Photo</label>
           <div id="listingMainDrop" class="image-dropzone mt-2" ondragover="event.preventDefault()" ondrop="handleImageDrop(event, 'listingMainDrop')">
             <i class="fa-solid fa-cloud-arrow-up text-xl text-brand-600"></i>
-            <p class="font-semibold mt-1">Drag a photo here, or choose a file</p>
-            <p class="text-[11px] text-slate-500">JPG, PNG or WEBP (maximum 5 MB)</p>
+            <p class="font-semibold mt-1">Drag an image file from your computer here, or choose a file</p>
+            <p class="text-[11px] text-slate-500">JPG, PNG or WEBP (maximum 5 MB). Photo uploads occur when you save the listing.</p>
             <input class="image-file-input mt-2" type="file" accept="image/jpeg,image/png,image/webp" onchange="handleImageSelection(event,'listingMainDrop')">
             <div class="image-previews mt-2 flex flex-wrap gap-2"></div>
           </div>

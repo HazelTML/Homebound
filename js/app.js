@@ -12,6 +12,7 @@ let dormsData = JSON.parse(JSON.stringify(sampleDormsData));
 let activeOwner = null;
 let demoOwnerAuthenticated = false;
 let editingListingId = null;
+let expandedOwnerListingId = null; // Only one property inventory card is open at a time.
 let roomEditorSerial = 0;
 let studentChatListingId = null;
 let studentChatToken = null;
@@ -874,11 +875,14 @@ function renderRentTracker() {
         byTenant.get(item.payment.tenantId).push(item);
     }
     const filter = document.getElementById('paymentStatusFilter')?.value || 'all';
+    const tenancyFilter = document.getElementById('tenancyStatusFilter')?.value || 'all';
     const tenants = tenantRecords
-        .filter(tenant => tenant.status === 'Active' || byTenant.has(tenant.id))
+        // Do not discard ended tenancies: they are permanent historical records.
+        .filter(tenant => tenancyFilter === 'all' || String(tenant.status).toLowerCase() === tenancyFilter)
         .filter(tenant => filter === 'all' || (byTenant.get(tenant.id) || [])
             .some(({ payment }) => payment.status.toLowerCase() === filter))
         .sort((a, b) => Number(b.status === 'Active') - Number(a.status === 'Active') ||
+            String(b.end_date || b.start_date || '').localeCompare(String(a.end_date || a.start_date || '')) ||
             String(a.tenant_name).localeCompare(String(b.tenant_name)));
 
     function pickDue(items) {
@@ -900,6 +904,18 @@ function renderRentTracker() {
             : 'bg-amber-100 text-amber-800';
         return `<span class="inline-block rounded-full px-2 py-1 text-[10px] font-bold ${color}">${escHtml(status)}</span>`;
     }
+    function tenancyBadge(tenant) {
+        const ended = tenant.status === 'Ended';
+        return `<span class="inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${ended ? 'bg-slate-200 text-slate-700' : 'bg-brand-100 text-brand-800'}">${ended ? 'Ended' : 'Active'}</span>`;
+    }
+    function tenureLength(tenant) {
+        if (!tenant.start_date || (tenant.status === 'Ended' && !tenant.end_date)) return 'Not available';
+        const start = Date.parse(`${tenant.start_date}T00:00:00Z`);
+        const end = Date.parse(`${tenant.status === 'Ended' ? tenant.end_date : currentPhilippineDate()}T00:00:00Z`);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 'Not available';
+        const days = Math.round((end - start) / 86400000);
+        return `${days} day${days === 1 ? '' : 's'}`;
+    }
     function paymentActions(item) {
         if (!item) return '';
         const { payment, index } = item;
@@ -915,11 +931,24 @@ function renderRentTracker() {
         const overdueCount = items.filter(({ payment }) => payment.status === 'Overdue').length;
         const endButton = tenant.status === 'Active'
             ? `<button type="button" onclick="endTenantAssignment('${escHtml(tenant.id)}')" class="px-2 py-1.5 rounded text-[10px] bg-rose-50 border border-rose-200 text-rose-700">End Tenancy</button>` : '';
-        const historyButton = items.length
-            ? `<button type="button" aria-expanded="${open}" aria-controls="tenant-history-${escHtml(tenant.id)}" onclick="toggleTenantPaymentHistory('${escHtml(tenant.id)}')" class="px-2 py-1.5 rounded text-[10px] bg-slate-100 border border-slate-200 text-slate-700">${open ? 'Hide' : 'Payment'} History (${items.length})</button>` : '';
+        const historyButton = `<button type="button" aria-expanded="${open}" aria-controls="tenant-history-${escHtml(tenant.id)}" onclick="toggleTenantPaymentHistory('${escHtml(tenant.id)}')" class="px-2 py-1.5 rounded text-[10px] bg-slate-100 border border-slate-200 text-slate-700">${open ? 'Hide Details' : 'View Record'} (${items.length} dues)</button>`;
         const history = open ? `<tr id="tenant-history-${escHtml(tenant.id)}" class="bg-slate-50">
             <td colspan="6" class="px-4 py-3">
-                <p class="text-[11px] font-bold text-slate-700 mb-2">Monthly payment history — ${escHtml(tenant.tenant_name)}</p>
+                <div class="mb-3 rounded-lg border border-slate-200 bg-white p-3">
+                    <p class="text-[11px] font-bold text-slate-800 mb-2">Tenancy record — ${escHtml(tenant.tenant_name)} ${tenancyBadge(tenant)}</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-2 text-[11px] text-slate-700">
+                        <div><strong>Start date:</strong> ${escHtml(tenant.start_date || 'Not recorded')}</div>
+                        <div><strong>End date:</strong> ${escHtml(tenant.end_date || (tenant.status === 'Active' ? 'Ongoing' : 'Not recorded'))}</div>
+                        <div><strong>Tenancy length:</strong> ${escHtml(tenureLength(tenant))}</div>
+                        <div><strong>Assigned bed:</strong> ${escHtml(tenant.bed_slot || 'Not recorded')}</div>
+                        <div><strong>Monthly due day:</strong> ${escHtml(tenant.due_day || 'Not recorded')}</div>
+                        <div><strong>Rent:</strong> ${escHtml(formatPeso(tenant.monthly_rent))}</div>
+                        <div><strong>Phone:</strong> ${escHtml(tenant.tenant_phone || 'Not recorded')}</div>
+                        <div><strong>Email:</strong> ${escHtml(tenant.tenant_email || 'Not recorded')}</div>
+                        <div><strong>Recorded payments:</strong> ${items.length}</div>
+                    </div>
+                </div>
+                <p class="text-[11px] font-bold text-slate-700 mb-2">Monthly payment history</p>
                 <div class="overflow-x-auto"><table class="w-full text-xs text-left">
                     <thead><tr class="text-slate-500 border-b border-slate-200">
                         <th class="p-2">Due Date</th><th class="p-2">Amount</th>
@@ -934,11 +963,13 @@ function renderRentTracker() {
         </tr>` : '';
         return `<tr class="hover:bg-slate-50 align-top">
             <td class="p-3"><strong class="block text-slate-900">${escHtml(tenant.tenant_name)}</strong>
-                <span class="text-slate-500">${escHtml(tenant.tenant_phone || '')}</span>
-                ${tenant.status === 'Active' ? '' : '<span class="block text-[10px] text-slate-500">Tenancy ended</span>'}</td>
+                <span class="block text-slate-500 my-1">${escHtml(tenant.tenant_phone || '')}</span>
+                ${tenancyBadge(tenant)}</td>
             <td class="p-3">${escHtml(lookupPropertyName(tenant.listing_id))}
                 <span class="block text-brand-700">${escHtml(tenant.room_name)}</span>
-                <span class="block text-[10px] text-slate-500">Move-in: ${escHtml(tenant.start_date)}</span></td>
+                <span class="block text-[10px] text-slate-500">Bed: ${escHtml(tenant.bed_slot || 'Not recorded')}</span>
+                <span class="block text-[10px] text-slate-500">Started: ${escHtml(tenant.start_date || 'Not recorded')}</span>
+                ${tenant.status === 'Ended' ? `<span class="block text-[10px] font-semibold text-slate-600">Ended: ${escHtml(tenant.end_date || 'Not recorded')}</span>` : ''}</td>
             <td class="p-3 font-semibold whitespace-nowrap">${escHtml(formatPeso(tenant.monthly_rent))}</td>
             <td class="p-3 whitespace-nowrap">${due ? escHtml(due.dueDate) : 'No due generated'}
                 ${overdueCount > 1 && filter === 'all' ? `<span class="block text-[10px] text-rose-600">${overdueCount} overdue dues</span>` : ''}</td>
@@ -948,15 +979,17 @@ function renderRentTracker() {
             </div></td>
         </tr>${history}`;
     }).join('') : `<tr><td colspan="6" class="p-6 text-center text-slate-500">${filter === 'all'
-        ? 'No tenant assignments yet. Open My Property Listings and assign a tenant to begin rent tracking.'
-        : 'No tenants have payment records matching this status.'}</td></tr>`;
+        ? 'No tenancy records match the selected filters. Assign a tenant from My Property Listings.'
+        : 'No tenancy records match the selected payment and tenancy filters.'}</td></tr>`;
 
     const active = tenantRecords.filter(tenant => tenant.status === 'Active');
+    const ended = tenantRecords.filter(tenant => tenant.status === 'Ended');
     const unpaid = all.filter(payment => payment.status !== 'Paid');
     const overdue = all.filter(payment => payment.status === 'Overdue');
     const paid = all.filter(payment => payment.status === 'Paid');
     const blocks = [
         ['Active Tenants', active.length, 'Current room assignments'],
+        ['Ended Tenancies', ended.length, 'Historical tenancy records retained'],
         ['Unpaid Dues', formatPeso(unpaid.reduce((sum, payment) => sum + payment.amount, 0)), 'Pending and overdue'],
         ['Overdue Dues', formatPeso(overdue.reduce((sum, payment) => sum + payment.amount, 0)), `${overdue.length} overdue monthly record(s)`],
         ['Recorded Paid', formatPeso(paid.reduce((sum, payment) => sum + payment.amount, 0)), 'Marked paid by landlord']
@@ -1293,52 +1326,88 @@ function sendSMSPaymentReminder(tenant, phone, amount, due) {
     showToast(`SMS preview (not sent) for ${phone}: "${smsMessage}"`, 'info');
 }
 
+function toggleOwnerListingDetails(dormIndex) {
+    const listing = dormsData[dormIndex];
+    if (!listing) return;
+    // An accordion: opening a listing collapses the previously open listing.
+    expandedOwnerListingId = expandedOwnerListingId === listing.id ? null : listing.id;
+    renderAdminListings();
+}
+
 function renderAdminListings() {
     const container = document.getElementById('adminListingsContainer');
+    if (!container) return;
     const mine = HomeboundStore.configured
         ? dormsData.filter(d => d.ownerId === activeOwner?.id)
         : dormsData;
     if (!mine.length) {
+        expandedOwnerListingId = null;
         container.innerHTML = '<p class="text-xs text-slate-500 col-span-full py-6">No listings yet. Use "Add New Unit/Listing" to create your first property.</p>';
         return;
     }
+    // Keep the owner's selected property expanded across realtime data refreshes.
+    // A removed property cannot remain selected.
+    if (expandedOwnerListingId !== null && !mine.some(d => d.id === expandedOwnerListingId)) {
+        expandedOwnerListingId = null;
+    }
     container.innerHTML = mine.map(d => {
-        // Keep original function index-based toggle signature; index comes from master list.
+        // Preserve original function index-based toggle signature; index comes from master list.
         const index = dormsData.findIndex(item => item.id === d.id);
+        const expanded = expandedOwnerListingId === d.id;
+        const beds = d.rooms.flatMap(r => displayBedSlots(r));
+        const totalBeds = beds.length;
+        const availableBeds = beds.filter(b => b.status === 'Available').length;
+        const hasAvailable = d.rooms.some(r => isRoomAvailable(r.status));
         return `
-        <div class="p-4 rounded-xl border border-slate-200 bg-white space-y-3">
-            <div class="flex items-center justify-between gap-2">
-                <h4 class="font-bold text-slate-900 text-sm">${escHtml(d.title)}</h4>
-                <span class="text-[10px] text-slate-400 font-mono">${escHtml(d.lastUpdated)}</span>
+        <article class="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm${expanded?' md:col-span-2':''}">
+            <button type="button"
+                onclick="toggleOwnerListingDetails(${index})"
+                aria-expanded="${expanded}"
+                aria-controls="ownerListingDetails-${index}"
+                class="w-full p-4 text-left hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand-600 transition-colors">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0 flex-1 space-y-1.5">
+                        <h4 class="font-bold text-slate-900 text-sm break-words">${escHtml(d.title)}</h4>
+                        <p class="text-[11px] text-slate-500">
+                            ${d.rooms.length} ${d.rooms.length===1?'room':'rooms'}
+                            <span class="mx-1">·</span>${availableBeds} / ${totalBeds} beds available
+                            <span class="mx-1">·</span><span class="font-semibold text-brand-700">${escHtml(d.priceRangeStr)}</span>
+                        </p>
+                        <p class="text-[10px] text-slate-400">${escHtml(d.lastUpdated)}</p>
+                    </div>
+                    <span class="shrink-0 inline-flex items-center gap-2 text-[11px] font-semibold text-brand-700 pt-1">
+                        <span>${expanded?'Hide details':'View details'}</span>
+                        <i class="fa-solid fa-chevron-${expanded?'up':'down'}" aria-hidden="true"></i>
+                    </span>
+                </div>
+            </button>
+            <div id="ownerListingDetails-${index}"
+                class="${expanded?'':'hidden '}border-t border-slate-100 px-4 pb-4 pt-3 space-y-3">
+                <div class="flex flex-wrap justify-between items-center gap-2 text-xs">
+                    <span class="font-semibold text-slate-700">Global Availability:</span>
+                    <button type="button" onclick="toggleDormAvailability(${index})" class="${hasAvailable?'bg-brand-600 hover:bg-brand-700':'bg-slate-600 hover:bg-slate-700'} text-white text-[10px] font-bold px-3 py-1.5 rounded-lg">
+                        ${hasAvailable?'Available':'Full / Occupied'}
+                    </button>
+                </div>
+                <div class="space-y-2 border-t border-slate-100 pt-3">
+                    ${d.rooms.map(r => `<div class="rounded-lg bg-slate-50 border border-slate-200 p-3">
+                        <div class="flex justify-between gap-2 mb-2"><strong class="text-xs">${escHtml(r.name)}</strong>
+                            <span class="text-[11px] font-semibold text-brand-700">${displayBedSlots(r).filter(b=>b.status==='Available').length} / ${displayBedSlots(r).length} available</span></div>
+                        <div class="flex gap-2 flex-wrap">${displayBedSlots(r).map(b => `<button type="button"
+                            ${b.status==='Occupied'?'disabled title="Occupied by an active tenant"':''}
+                            onclick="toggleBedAvailability(${bedActionParams(d.id,r.name,b.id)})"
+                            aria-pressed="${b.status==='Unavailable'}"
+                            class="rounded-lg px-3 py-2 text-[11px] font-semibold border ${b.status==='Occupied'?'bg-slate-300 text-slate-600 cursor-not-allowed':b.status==='Available'?'bg-brand-50 border-brand-300 text-brand-800 hover:bg-brand-100':'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'}">
+                            ${escHtml(b.id.replace('bed-','Bed '))}: ${escHtml(b.status)}</button>`).join('')}</div>
+                    </div>`).join('')}
+                </div>
+                <div class="flex flex-wrap gap-2 text-xs">
+                    <button type="button" onclick="openTenantAssignmentModal(null,'${validListingId(d.id) ? d.id : ''}')" class="bg-brand-50 border border-brand-200 text-brand-800 rounded-lg px-3 py-2 font-bold">Assign Tenant</button>
+                    <button type="button" onclick="openEditListingModal('${validListingId(d.id) ? d.id : ''}')" class="bg-slate-100 border border-slate-200 text-slate-700 rounded-lg px-3 py-2 font-bold">Edit Property & Rooms</button>
+                    <button type="button" onclick="deleteListing('${validListingId(d.id) ? d.id : ''}')" class="bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-3 py-2 font-bold">Delete</button>
+                </div>
             </div>
-            <div class="text-xs text-slate-600 flex justify-between gap-2">
-                <span>Total Rooms: ${d.rooms.length}</span>
-                <span class="font-bold text-brand-700">${escHtml(d.priceRangeStr)}</span>
-            </div>
-            <div class="pt-2 border-t border-slate-100 flex flex-wrap justify-between items-center gap-2 text-xs">
-                <span class="font-semibold text-slate-700">Global Availability:</span>
-                <button onclick="toggleDormAvailability(${index})" class="bg-brand-600 hover:bg-brand-700 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg">
-                    ${escHtml(d.rooms.some(r => isRoomAvailable(r.status)) ? 'Available' : 'Full / Occupied')}
-                </button>
-            </div>
-            <div class="space-y-2 border-t border-slate-100 pt-3">
-               ${d.rooms.map(r => `<div class="rounded-lg bg-slate-50 border border-slate-200 p-3">
-                 <div class="flex justify-between gap-2 mb-2"><strong class="text-xs">${escHtml(r.name)}</strong>
-                   <span class="text-[11px] font-semibold text-brand-700">${displayBedSlots(r).filter(b=>b.status==='Available').length} / ${displayBedSlots(r).length} available</span></div>
-                 <div class="flex gap-2 flex-wrap">${displayBedSlots(r).map(b => `<button type="button"
-                    ${b.status==='Occupied'?'disabled title="Occupied by an active tenant"':''}
-                    onclick="toggleBedAvailability(${bedActionParams(d.id,r.name,b.id)})"
-                    aria-pressed="${b.status==='Unavailable'}"
-                    class="rounded-lg px-3 py-2 text-[11px] font-semibold border ${b.status==='Occupied'?'bg-slate-300 text-slate-600 cursor-not-allowed':b.status==='Available'?'bg-brand-50 border-brand-300 text-brand-800 hover:bg-brand-100':'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'}">
-                    ${escHtml(b.id.replace('bed-','Bed '))}: ${escHtml(b.status)}</button>`).join('')}</div>
-               </div>`).join('')}
-            </div>
-            <div class="flex gap-2 text-xs">
-                <button onclick="openTenantAssignmentModal(null,'${validListingId(d.id) ? d.id : ''}')" class="bg-brand-50 border border-brand-200 text-brand-800 rounded-lg px-3 py-2 font-bold">Assign Tenant</button>
-                <button onclick="openEditListingModal('${validListingId(d.id) ? d.id : ''}')" class="bg-slate-100 border border-slate-200 text-slate-700 rounded-lg px-3 py-2 font-bold">Edit Property & Rooms</button>
-                <button onclick="deleteListing('${validListingId(d.id) ? d.id : ''}')" class="bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-3 py-2 font-bold">Delete</button>
-            </div>
-        </div>`;
+        </article>`;
     }).join('');
 }
 
@@ -1578,6 +1647,12 @@ async function saveListing(event) {
             rooms.push({...room, images});
         }
         const mainImages = await collectZoneImages(document.getElementById('listingMainDrop'),imageWarnings);
+        if (imageWarnings.length) {
+            const message = `${imageWarnings.length} selected photo(s) failed to upload.\n\n${imageWarnings.join('\n').slice(0, 950)}\n\nSave the listing without those photos? Choose Cancel to keep the form open and retry.`;
+            if (!window.confirm(message)) {
+                throw new Error('Photo upload was unsuccessful. Your listing form is still open; check Supabase Storage and try saving again.');
+            }
+        }
         const prices = rooms.map(r => r.price);
         const minPrice = Math.min(...prices), maxPrice = Math.max(...prices);
         const old = editingListingId ? dormsData.find(d => d.id === editingListingId) : null;
@@ -1607,7 +1682,7 @@ async function saveListing(event) {
         refreshListingViews();
         refreshDashboardStats();
         if (imageWarnings.length) {
-            showToast(`Listing saved, but ${imageWarnings.length} photo(s) could not upload. Edit the listing to retry. ${imageWarnings[0]}`, 'error');
+            showToast(`Listing saved without ${imageWarnings.length} selected photo(s). ${imageWarnings[0]}`, 'error');
         } else showToast('Property, bed slots and room details saved successfully.', 'success');
     } catch (err) {
         showToast(`Could not save listing: ${err.message}`, 'error');
@@ -1803,45 +1878,157 @@ function addCustomAmenity(index) {
 function setZoneImages(id, existing = [], single = false) {
     const zone = document.getElementById(id);
     if (!zone) return;
+    (zone.previewObjectUrls || []).forEach(url => URL.revokeObjectURL(url));
+    zone.previewObjectUrls = [];
     zone.existingImages = [...existing];
     zone.pendingFiles = [];
     zone.singleImage = single;
     renderZoneImages(id);
 }
+function normalizeImageFile(file) {
+    if (!(file instanceof File)) throw new Error('Drop an image saved on your computer (JPG, PNG or WEBP).');
+    const ext = String(file.name || '').toLowerCase().split('.').pop();
+    const inferred = {jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', webp:'image/webp'}[ext];
+    const type = file.type || inferred;
+    if (!imageTypes.includes(type) || (inferred && file.type && file.type !== inferred)) {
+        throw new Error(`Unsupported file ${file.name}. Use JPG, PNG or WEBP.`);
+    }
+    if (!file.size) throw new Error(`${file.name} contains 0 bytes. Save the complete image to your Downloads folder, check that it opens, then drag it from Files/Downloads or use Choose File. Images dragged from a browser tab or cloud preview may be empty placeholders.`);
+    if (file.size > 5 * 1024 * 1024) throw new Error(`${file.name} exceeds the 5 MB limit.`);
+    return file.type ? file : new File([file], file.name, { type, lastModified:file.lastModified });
+}
 function validateImageFile(file) {
-    if (!imageTypes.includes(file.type)) throw new Error('Upload only JPG, PNG or WEBP photos.');
-    if (file.size > 5 * 1024 * 1024) throw new Error(`Photo ${file.name} exceeds 5MB.`);
+    return normalizeImageFile(file);
 }
 function setDroppedImages(id, files) {
     const zone = document.getElementById(id);
     if (!zone) return;
     try {
-        const next = [...files];
-        next.forEach(validateImageFile);
-        const existing = zone.existingImages || [];
+        const next = Array.from(files || []).map(normalizeImageFile);
+        if (!next.length) throw new Error('No image files detected. Drag files from your computer or use Choose File.');
         if (zone.singleImage) {
-            zone.pendingFiles = next.slice(0,1);
-            if (next.length) zone.existingImages = [];
+            zone.pendingFiles = next.slice(0, 1);
+            zone.existingImages = [];
         } else {
-            if (existing.length + (zone.pendingFiles || []).length + next.length > 5)
-                throw new Error('Maximum of five images per room.');
-            zone.pendingFiles = [...(zone.pendingFiles || []), ...next];
+            const pending = zone.pendingFiles || [];
+            const unique = next.filter(file => !pending.some(old => old.name === file.name && old.size === file.size && old.lastModified === file.lastModified));
+            if ((zone.existingImages || []).length + pending.length + unique.length > 5)
+                throw new Error('A room can contain up to five images. Remove a photo before adding another.');
+            zone.pendingFiles = [...pending, ...unique];
         }
         renderZoneImages(id);
-    } catch (err) { showToast(err.message, 'error'); }
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
 }
-function handleImageSelection(event,id) {
-    setDroppedImages(id,event.target.files);
+function handleImageSelection(event, id) {
+    setDroppedImages(id, event.target.files);
     event.target.value = '';
 }
-function handleImageDrop(event,id) {
+async function handleImageDrop(event, id) {
     event.preventDefault();
-    setDroppedImages(id,event.dataTransfer.files);
+    event.stopPropagation();
+
+    // Copy DataTransfer data NOW, while the drop event is active. The browser
+    // protects file data after the event ends, especially for cloud-backed files.
+    const transfer = event.dataTransfer;
+    const directFiles = Array.from(transfer?.files || []);
+    const fileItems = Array.from(transfer?.items || []).filter(item => item.kind === 'file');
+    const itemFiles = fileItems.map(item => item.getAsFile?.()).filter(Boolean);
+
+    // Some Chromium/ChromeOS drags expose a 0-byte placeholder through .files
+    // even though the Files app can supply the actual bytes through a handle.
+    // Request handles synchronously during the drop event (before any await).
+    const recoveryPromises = [];
+    for (const item of fileItems) {
+        if (typeof item.getAsFileSystemHandle === 'function') {
+            try {
+                recoveryPromises.push(Promise.resolve(item.getAsFileSystemHandle())
+                    .then(handle => handle?.kind === 'file' ? handle.getFile() : null));
+            } catch (_) { /* Other supported browser paths are tried below. */ }
+        }
+        if (typeof item.webkitGetAsEntry === 'function') {
+            try {
+                const entry = item.webkitGetAsEntry();
+                if (entry?.isFile) {
+                    recoveryPromises.push(new Promise(resolve =>
+                        entry.file(resolve, () => resolve(null))));
+                }
+            } catch (_) { /* Continue with File objects already captured. */ }
+        }
+    }
+
+    let files = directFiles.length ? directFiles : itemFiles;
+    if (!files.length || files.some(file => file.size === 0)) {
+        const resolved = await Promise.allSettled(recoveryPromises);
+        const recoveredFiles = [...itemFiles, ...resolved
+            .filter(result => result.status === 'fulfilled')
+            .map(result => result.value)]
+            .filter(file => file instanceof File && file.size > 0);
+        if (!files.length) {
+            files = recoveredFiles;
+        } else {
+            files = files.map(file => file.size > 0 ? file
+                : (recoveredFiles.find(candidate => candidate.name === file.name)
+                    || (files.length === 1 ? recoveredFiles[0] : null)
+                    || file));
+        }
+    }
+
+    if (!files.length) {
+        showToast('No local image file was received. Save the image to your computer, then drag it from Files/Downloads or use Choose File.', 'error');
+        return;
+    }
+    setDroppedImages(id, files);
 }
-function removeZoneImage(id,which,index) {
+function markImageDropzone(zone, isDragging) {
+    if (!zone) return;
+    zone.classList.toggle('border-brand-600', isDragging);
+    zone.classList.toggle('bg-brand-50', isDragging);
+    zone.classList.toggle('ring-2', isDragging);
+    zone.classList.toggle('ring-brand-200', isDragging);
+}
+function setupImageDropHandling() {
+    // Capture-phase delegation also works for room dropzones added after page load.
+    // Prevent inline ondrop handlers from adding the same file twice.
+    const targetZone = event => event.target instanceof Element ? event.target.closest('.image-dropzone') : null;
+    document.addEventListener('dragenter', event => {
+        const zone = targetZone(event);
+        if (zone) markImageDropzone(zone, true);
+    }, true);
+    document.addEventListener('dragover', event => {
+        const zone = targetZone(event);
+        if (!zone) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+        markImageDropzone(zone, true);
+    }, true);
+    document.addEventListener('dragleave', event => {
+        const zone = targetZone(event);
+        if (zone && (!event.relatedTarget || !zone.contains(event.relatedTarget))) markImageDropzone(zone, false);
+    }, true);
+    document.addEventListener('drop', event => {
+        const zone = targetZone(event);
+        if (!zone) {
+            // Avoid browser navigation if a file is dropped just outside the box.
+            if (!document.getElementById('modalListingEditor')?.classList.contains('hidden') && event.dataTransfer?.files?.length)
+                event.preventDefault();
+            return;
+        }
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        markImageDropzone(zone, false);
+        handleImageDrop(event, zone.id);
+    }, true);
+    window.addEventListener('dragend', () => {
+        document.querySelectorAll('.image-dropzone').forEach(zone => markImageDropzone(zone, false));
+    });
+}
+function removeZoneImage(id, which, index) {
     const zone = document.getElementById(id);
-    if (which === 'existing') zone.existingImages.splice(index,1);
-    else zone.pendingFiles.splice(index,1);
+    if (!zone) return;
+    if (which === 'existing') zone.existingImages.splice(index, 1);
+    else zone.pendingFiles.splice(index, 1);
     renderZoneImages(id);
 }
 function renderZoneImages(id) {
@@ -1850,17 +2037,28 @@ function renderZoneImages(id) {
     (zone.previewObjectUrls || []).forEach(url => URL.revokeObjectURL(url));
     zone.previewObjectUrls = [];
     const preview = zone.querySelector('.image-previews');
-    const stored = (zone.existingImages || []).map((src,index) => ({src,kind:'existing',index}));
-    const pending = (zone.pendingFiles || []).map((file,index) => {
-        const src = URL.createObjectURL(file); zone.previewObjectUrls.push(src);
-        return {src,kind:'pending',index};
+    if (!preview) return;
+    const stored = (zone.existingImages || []).map((src, index) => ({src, kind:'existing', index}));
+    const pending = (zone.pendingFiles || []).map((file, index) => {
+        const src = URL.createObjectURL(file);
+        zone.previewObjectUrls.push(src);
+        return {src, kind:'pending', index};
     });
-    preview.innerHTML = [...stored,...pending].map(item => `<div class="relative w-20 h-20">
-       <img src="${safeImageUrl(item.src)}" alt="Uploaded property photo" class="w-full h-full object-cover rounded-lg border border-slate-200">
+    preview.innerHTML = [...stored, ...pending].map(item => `<div class="relative w-20 h-20">
+       <img src="${safeImageUrl(item.src)}" alt="Property photo" class="w-full h-full object-cover rounded-lg border border-slate-200">
        <button type="button" aria-label="Remove photo" onclick="removeZoneImage('${id}','${item.kind}',${item.index})" class="absolute -top-1 -right-1 rounded-full bg-rose-600 text-white w-5 h-5">×</button></div>`).join('');
+    let notice = zone.querySelector('.image-upload-notice');
+    if (!notice) {
+        notice = document.createElement('p');
+        notice.className = 'image-upload-notice text-[11px] text-slate-600 mt-2';
+        preview.insertAdjacentElement('beforebegin', notice);
+    }
+    notice.textContent = pending.length
+        ? `${pending.length} selected photo${pending.length === 1 ? '' : 's'} ready to upload when you save the listing.`
+        : stored.length ? `${stored.length} saved photo${stored.length === 1 ? '' : 's'}.` : 'No photos selected yet.';
 }
 function fileAsDataUrl(file) {
-    return new Promise((resolve,reject) => {
+    return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result);
         reader.onerror = () => reject(new Error('Could not read photo.'));
@@ -1868,20 +2066,23 @@ function fileAsDataUrl(file) {
     });
 }
 async function collectZoneImages(zone, warnings = []) {
-    const originals = [...(zone.existingImages || [])];
+    const urls = [...(zone.existingImages || [])];
     for (const file of (zone.pendingFiles || [])) {
         try {
-            const remoteUrl=HomeboundStore.configured ? await HomeboundStore.uploadImage(file) : await fileAsDataUrl(file);
-            originals.push(remoteUrl);
+            const publicUrl = HomeboundStore.configured
+                ? await HomeboundStore.uploadImage(file)
+                : await fileAsDataUrl(file);
+            urls.push(publicUrl);
         } catch (err) {
-            // Photos are optional; network/storage failure must not discard a valid listing.
-            // Do not store blob: preview URLs or data: images as Supabase public URLs.
-            console.warn('Homebound photo upload failed:', err);
-            warnings.push(err.message);
+            const section = zone.singleImage ? 'Main photo' : 'Room photo';
+            const message = `${section} (${file.name}): ${err.message}`;
+            console.error('Homebound photo upload failed:', message, err);
+            warnings.push(message);
         }
     }
-    return zone.singleImage ? originals.slice(0,1) : originals;
+    return zone.singleImage ? urls.slice(0, 1) : urls;
 }
+setupImageDropHandling();
 function readSavedStudentConversations() {
     const records=[];
     for (let i=0;i<localStorage.length;i++) {
@@ -2064,6 +2265,16 @@ function renderAnalytics() {
     const holds = getOwnerHoldList();
     const chats = ownerConversations;
     const pending = holds.filter(h => h.status === 'Pending Approval').length;
+    const endedTenancies = tenantRecords.filter(t => t.status === 'Ended');
+    const endedLengths = endedTenancies.map(t => {
+        const begin = Date.parse(`${t.start_date}T00:00:00Z`);
+        const finish = Date.parse(`${t.end_date}T00:00:00Z`);
+        return Number.isFinite(begin) && Number.isFinite(finish) && finish >= begin
+            ? Math.round((finish - begin) / 86400000) : null;
+    }).filter(days => days !== null);
+    const avgEndedDays = endedLengths.length
+        ? `${Math.round(endedLengths.reduce((sum, days) => sum + days, 0) / endedLengths.length)} days`
+        : 'N/A';
     const rateTotal = rooms.reduce((sum,r)=>sum + (Number(r.price)||0),0);
     const availabilityPct = rooms.length ? Math.round(availableRooms.length / rooms.length * 100) : 0;
     document.getElementById('analyticsPeriod').textContent = `Prepared ${new Date().toLocaleDateString('en-PH', {year:'numeric',month:'long',day:'numeric'})}`;
@@ -2075,7 +2286,9 @@ function renderAnalytics() {
         analyticsKpi('Rooms Available',`${availableRooms.length}/${rooms.length}`,`${availabilityPct}% of listed rooms`),
         analyticsKpi('Student Inquiries',chats.length,'Unique conversations'),
         analyticsKpi('Pending Visits',pending,'Requests awaiting review'),
-        analyticsKpi('Active Renters',tenantRecords.filter(t=>t.status==='Active').length,'Signed tenant assignments'),
+        analyticsKpi('Active Renters',tenantRecords.filter(t=>t.status==='Active').length,'Current tenant assignments'),
+        analyticsKpi('Ended Tenancies',endedTenancies.length,'Historical tenancy records'),
+        analyticsKpi('Avg. Completed Stay',avgEndedDays,'Based on recorded start and end dates'),
         analyticsKpi('Overdue Rent',formatPeso(getPaymentViewRecords().filter(p=>p.status==='Overdue').reduce((sum,p)=>sum+p.amount,0)),'Outstanding past-due amounts')
     ].join('');
     const monthKeys = Array.from({length:6},(_,i)=>{const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-(5-i));return {key:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,label:d.toLocaleString('en-PH',{month:'short',year:'2-digit'})};});
@@ -2096,6 +2309,8 @@ function renderAnalytics() {
     if (rooms.length && !availableRooms.length) recommendations.push(analyticsAdvice('Keep availability accurate','All listed rooms are marked full. Update availability as soon as rooms reopen.'));
     if (chats.length) recommendations.push(analyticsAdvice('Respond to student inquiries',`${chats.length} student conversation(s) recorded. Review unanswered questions and respond with specific visit details.`));
     else recommendations.push(analyticsAdvice('Encourage inquiries','No recorded student conversations yet. Keep contact details and images complete so prospective tenants can ask questions.'));
+    if (endedTenancies.length) recommendations.push(analyticsAdvice('Review tenancy turnover',
+        `${endedTenancies.length} tenancy record(s) have ended. Use their start and end dates to review stay duration and plan vacancy marketing.`));
     if (rooms.length > 1) recommendations.push(analyticsAdvice('Review your advertised rent',`The average room rate is ₱${Math.round(rateTotal/rooms.length).toLocaleString()}/month. Compare rates against facilities and nearby properties; this is not collected revenue.`));
     document.getElementById('analyticsRecommendations').innerHTML = recommendations.join('');
     const propertyRows = listings.map(d => `<tr class="border-b border-slate-100"><td class="p-2 font-semibold">${escHtml(d.title)}</td>

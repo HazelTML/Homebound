@@ -103,32 +103,51 @@ const HomeboundStore = (() => {
         if (error) throw error;
         return data.id;
     }
-    // Upload originals as binary files (never blob: preview URLs or base64 strings).
-    // Network errors are distinguished from Storage permissions and validation errors.
+    // Upload actual File binaries to the landlord's secured Storage folder.
     async function uploadImage(file) {
         const owner = await currentOwner();
-        if (!owner) throw new Error('Please sign in as an approved landlord to upload photos.');
-        if (!(file instanceof File)) throw new Error('Please select an image file again.');
-        const allowed = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
-        if (!allowed[file.type]) throw new Error('Only JPG, PNG, and WEBP photos are supported.');
-        if (!file.size || file.size > 5 * 1024 * 1024) throw new Error('Image files must be between 1 byte and 5 MB.');
-        const filename = `${owner.id}/${crypto.randomUUID()}.${allowed[file.type]}`;
+        if (!owner) throw new Error('Landlord session expired. Sign in again before uploading images.');
+        if (!(file instanceof File)) throw new Error('Select an image file from your computer.');
+        const supported = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+        if (!supported[file.type]) throw new Error('Select a JPG, PNG or WEBP image.');
+        if (file.size < 1 || file.size > 5 * 1024 * 1024)
+            throw new Error('An image must be no larger than 5 MB and cannot be empty.');
+        // Never use the original user-controlled filename as a storage path.
+        const randomId = typeof crypto?.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const path = `${owner.id}/${randomId}.${supported[file.type]}`;
+        let savedPath;
         try {
-            const { data, error } = await getClient().storage.from('listing-images').upload(filename, file, {
-                cacheControl: '3600', contentType: file.type, upsert: false
+            const { data, error } = await getClient().storage.from('listing-images').upload(path, file, {
+                contentType: file.type,
+                cacheControl: '3600',
+                upsert: false
             });
             if (error) throw error;
-            if (!data?.path) throw new Error('Storage did not confirm the uploaded file.');
-            const { data: publicFile } = getClient().storage.from('listing-images').getPublicUrl(data.path);
-            const publicUrl = publicFile?.publicUrl || '';
-            if (!publicUrl.startsWith('https://')) throw new Error('Storage did not return a valid image URL.');
-            return publicUrl;
-        } catch (err) {
-            if (err instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(String(err?.message || ''))) {
-                throw new Error('Supabase Storage is unreachable. Check your Project URL, internet connection, and browser Network tab.');
+            savedPath = data?.path;
+            if (!savedPath) throw new Error('Supabase Storage did not confirm the photo upload.');
+        } catch (error) {
+            const message = String(error?.message || 'Unknown upload error');
+            const status = Number(error?.statusCode || error?.status || 0);
+            if (/failed to fetch|networkerror|load failed|fetch failed/i.test(message) || error instanceof TypeError) {
+                throw new Error('Cannot reach Supabase Storage. Confirm the Project URL and internet connection; inspect the browser Network tab for a blocked storage/v1 request.');
             }
-            throw new Error(`Photo upload rejected: ${err?.message || 'Unknown Storage error'}. Check the listing-images bucket and its upload policy.`);
+            if (status === 401 || status === 403 || /row.level.security|permission|unauthorized|forbidden/i.test(message)) {
+                throw new Error('Supabase rejected the upload. Verify that you are signed in, the landlord is approved, and the listing-images Storage INSERT policy allows your user ID folder.');
+            }
+            if (status === 404 || /bucket not found/i.test(message)) {
+                throw new Error('Storage bucket listing-images does not exist. Run the current schema.sql or create the bucket with the required policies.');
+            }
+            if (status === 413 || /too large|exceeds.*size/i.test(message)) {
+                throw new Error('The image exceeds the Supabase Storage file-size limit of 5 MB.');
+            }
+            throw new Error(`Supabase Storage upload failed: ${message}${status ? ` (HTTP ${status})` : ''}`);
         }
+        const { data } = getClient().storage.from('listing-images').getPublicUrl(savedPath);
+        if (!data?.publicUrl?.startsWith('https://'))
+            throw new Error('The image uploaded, but its public URL could not be generated. Check the listing-images bucket settings.');
+        return data.publicUrl;
     }
     async function callRpc(name, params) {
         const { data, error } = await getClient().rpc(name, params);
