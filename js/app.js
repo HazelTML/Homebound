@@ -142,8 +142,9 @@ document.addEventListener('error', event => {
 }, true);
 
 window.onload = async function() {
-    if (window.L) initLeafletMap();
-    else showToast('Map library did not load. Check your internet connection.', 'error');
+    // Map assets are hosted by third parties: initialize asynchronously so a blocked CDN
+    // cannot prevent listings, holds, or messages from loading.
+    void retryHomeboundMap();
     renderListingsGrid(dormsData);
     renderAdminTables();
     if (window.Chart) initAnalyticsCharts();
@@ -158,6 +159,7 @@ window.onload = async function() {
     // directly to private chat tables. Also checks conversations after page reload.
     dormsData.forEach(d => d.rooms.forEach(syncBedCountStatus));
     pollStudentInbox();
+    initializeHomeboundExtras();
     studentInboxTimer = setInterval(pollStudentInbox, 12000);
     window.addEventListener('focus', pollStudentInbox);
     if (!HomeboundStore.configured) {
@@ -178,53 +180,222 @@ window.onload = async function() {
             else if (kind === 'messages') { if (currentPortal === 'owner') loadOwnerInbox(); refreshStudentChat(); }
             else if (kind === 'holds') { if (currentPortal === 'owner') loadOwnerHolds(); refreshActiveHold(); }
             else if (kind === 'tenancies' || kind === 'payments') { if (activeOwner) loadOwnerRentData(); }
+            else if (kind === 'announcements' && activeOwner) loadTenantAnnouncements();
+            else if (kind === 'advance_reservations' && activeOwner) loadAdvanceReservations();
         });
     } catch (err) {
         showToast(`Supabase authorization error: ${err.message}`, 'error');
     }
 };
 
-function initLeafletMap() {
-    // Baguio City, Benguet, Philippines. Never invent property coordinates.
-    leafletMap = L.map('map').setView([16.4023, 120.5960], 13);
+// Make Leaflet resilient to a blocked CDN; JS and CSS are both necessary.
+let homeboundMapRetry = null;
+let homeboundMapTileLayer = null;
+const HOMEBOUND_MAP_CENTER = [16.4023, 120.5960];
+// Standard OpenStreetMap street tiles. The website MUST send its origin as a
+// Referer for this public service; index.html uses strict-origin-when-cross-origin.
+// Follow https://operations.osmfoundation.org/policies/tiles/ for fair use.
+// Do not cycle through alternate public servers to evade an access denial.
+const HOMEBOUND_TILE_SOURCES = [
+    {
+        url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        options: {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>',
+            maxZoom: 19,
+            // No subdomains, query-string cache busting, proxying or referer masking.
+            referrerPolicy: 'strict-origin-when-cross-origin'
+        }
+    }
+];
+let homeboundTileSourceIndex = 0;
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(leafletMap);
-
-    // Populate markers
-    updateMapMarkers(dormsData);
+function loadMapAsset(url, type, timeoutMs = 4500) {
+    return new Promise(resolve => {
+        const asset = document.createElement(type === 'style' ? 'link' : 'script');
+        let done = false;
+        const finish = ok => {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            if (!ok) asset.remove();
+            resolve(ok);
+        };
+        if (type === 'style') { asset.rel = 'stylesheet'; asset.href = url; }
+        else { asset.src = url; asset.async = true; }
+        asset.onload = () => finish(true);
+        asset.onerror = () => finish(false);
+        const timer = setTimeout(() => finish(false), timeoutMs);
+        document.head.appendChild(asset);
+    });
 }
+async function loadHomeboundMapLibrary() {
+    if (!window.L?.map) {
+        const urls = [
+            'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js',
+            'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js',
+            'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+        ];
+        for (const url of urls) {
+            if (window.L?.map) break;
+            await loadMapAsset(url, 'script');
+        }
+    }
+    if (!window.L?.map) return false;
+    // The original stylesheet is in index.html, but may be blocked independently.
+    if (!document.querySelector('link[data-homebound-leaflet-style]')) {
+        for (const url of [
+            'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css',
+            'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css',
+            'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+        ]) {
+            if (await loadMapAsset(url, 'style')) {
+                // Identify the successfully loaded backup for future retries.
+                const links = [...document.querySelectorAll('link[rel="stylesheet"]')];
+                const link = links.find(l => l.href === url);
+                link?.setAttribute('data-homebound-leaflet-style', 'true');
+                break;
+            }
+        }
+    }
+    return true;
+}
+function homeboundMapStatus(message='') {
+    const el=document.getElementById('mapStatus');
+    const msg=document.getElementById('mapStatusText');
+    if (!el || !msg) return;
+    msg.textContent=message;
+    el.classList.toggle('hidden',!message);
+}
+async function retryHomeboundMap() {
+    if (homeboundMapRetry) return homeboundMapRetry;
+    homeboundMapStatus('Loading map of Baguio…');
+    homeboundMapRetry = (async () => {
+        try {
+            const loaded = await loadHomeboundMapLibrary();
+            if (!loaded) throw new Error('Could not load the map library. Check your internet connection, then try Retry map.');
+            if (!leafletMap) initLeafletMap();
+            else {
+                leafletMap.invalidateSize();
+                updateMapMarkers(dormsData);
+                // Refresh the standard street-map tiles if retry is requested.
+                if (homeboundMapTileLayer) chooseHomeboundTiles(leafletMap, homeboundTileSourceIndex);
+            }
+            setTimeout(() => leafletMap?.invalidateSize(), 250);
+        } catch (err) {
+            homeboundMapStatus(err?.message || 'Map is temporarily unavailable.');
+        } finally {
+            homeboundMapRetry = null;
+        }
+    })();
+    return homeboundMapRetry;
+}
+function chooseHomeboundTiles(map, sourceIndex = 0) {
+    if (!map || !window.L?.tileLayer) return;
 
+    // Keep different tile layers for the student map and owner's location picker.
+    // Removing the old layer prevents a previous 403 image from remaining visible.
+    if (map._homeboundBaseTiles) {
+        map.off('unload', map._homeboundBaseCleanup);
+        map.removeLayer(map._homeboundBaseTiles);
+    }
+    const source = HOMEBOUND_TILE_SOURCES[sourceIndex];
+    if (!source) return;
+    const layer = L.tileLayer(source.url, {
+        ...source.options,
+        // Avoid requesting an unnecessary crossOrigin image mode.
+        updateWhenIdle: true,
+        keepBuffer: 2
+    });
+    map._homeboundBaseTiles = layer;
+    if (map === leafletMap) homeboundMapTileLayer = layer;
+
+    let errors = 0;
+    let finished = false;
+    const isCurrent = () => map._homeboundBaseTiles === layer && map.hasLayer(layer);
+    const timeout = setTimeout(() => {
+        if (!finished && isCurrent()) failed();
+    }, 9000);
+    function failed() {
+        if (finished || !isCurrent()) return;
+        finished = true;
+        clearTimeout(timeout);
+        if (sourceIndex + 1 < HOMEBOUND_TILE_SOURCES.length) {
+            homeboundMapStatus('Trying another map provider…');
+            map.removeLayer(layer);
+            chooseHomeboundTiles(map, sourceIndex + 1);
+        } else if (map === leafletMap) {
+            homeboundMapStatus('Street map tiles could not load. Check browser Network for 403 errors and verify the site sends its Referer. Your property pins are still saved.');
+        } else {
+            const status = document.getElementById('listingPinStatus');
+            if (status) status.textContent = 'Map background unavailable. Try reopening the listing editor.';
+        }
+    }
+    layer.on('tileerror', () => { if (++errors >= 3) failed(); });
+    layer.on('load', () => {
+        if (finished || !isCurrent()) return;
+        finished = true;
+        clearTimeout(timeout);
+        if (map === leafletMap) homeboundMapStatus('');
+    });
+    layer.addTo(map);
+}
+async function loadHomeboundChartLibrary() {
+    if(window.Chart)return true;
+    const urls=[
+      'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.7/chart.umd.min.js',
+      'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js'
+    ];
+    for(const url of urls){
+      if(window.Chart)return true;
+      const success=await new Promise(resolve=>{
+        const script=document.createElement('script');script.src=url;
+        script.onload=()=>resolve(Boolean(window.Chart));script.onerror=()=>resolve(false);
+        document.head.appendChild(script);
+      });
+      if(success)return true;
+    }
+    return Boolean(window.Chart);
+}
+function initLeafletMap() {
+    if (leafletMap) return;
+    const node = document.getElementById('map');
+    if (!node || !window.L?.map) throw new Error('Map container or Leaflet library is missing.');
+    leafletMap = L.map(node, {scrollWheelZoom:false}).setView(HOMEBOUND_MAP_CENTER,13);
+    chooseHomeboundTiles(leafletMap, homeboundTileSourceIndex);
+    updateMapMarkers(dormsData);
+    setTimeout(() => leafletMap?.invalidateSize(), 200);
+}
 function updateMapMarkers(items) {
     if (!leafletMap) return;
     mapMarkers.forEach(marker => leafletMap.removeLayer(marker));
-    mapMarkers = [];
+    mapMarkers=[];
     items.forEach(item => {
-        if (!Number.isFinite(item.lat) || !Number.isFinite(item.lng) ||
-            item.lat < -90 || item.lat > 90 || item.lng < -180 || item.lng > 180) return;
-        const marker = L.marker([item.lat, item.lng], {
-            title: item.title, alt: `View ${item.title}`
-        }).addTo(leafletMap);
-        marker.bindTooltip(escHtml(item.title), {direction:'top'});
-        // One click opens the precise listing, including its rooms and images.
-        marker.on('click', () => openBedspaceViewer(item.id));
+        const lat=item.lat==null?NaN:Number(item.lat),lng=item.lng==null?NaN:Number(item.lng);
+        if(!Number.isFinite(lat)||!Number.isFinite(lng)||lat < -90||lat>90||lng < -180||lng>180)return;
+        const marker=L.marker([lat,lng],{title:item.title,alt:`View ${item.title}`}).addTo(leafletMap);
+        marker.bindTooltip(escHtml(item.title),{direction:'top'});
+        marker.on('click',()=>openBedspaceViewer(item.id));
         mapMarkers.push(marker);
     });
+    const count=document.getElementById('mapPinCount');
+    const baguioPins=items.filter(d=>d.lat!=null&&d.lng!=null&&
+        Number.isFinite(Number(d.lat))&&Number.isFinite(Number(d.lng))&&
+        Math.abs(Number(d.lat)-16.4023)<0.27&&Math.abs(Number(d.lng)-120.5960)<0.27).length;
+    if(count)count.textContent=baguioPins?`${baguioPins} Baguio ${baguioPins===1?'pin':'pins'} · click to inspect`:
+        'No Baguio pins yet — add a listing and pin its location in the owner editor.';
 }
 
 function initializeListingPinMap() {
     const container = document.getElementById('listingPinMap');
     if (!container) return;
     if (!window.L) {
-        document.getElementById('listingPinStatus').textContent = 'Map cannot load. Check the network and try again.';
+        document.getElementById('listingPinStatus').textContent = 'Map unavailable. Check internet connection, close and reopen this form to retry.';
+        loadHomeboundMapLibrary().then(loaded => { if (loaded && !document.getElementById('modalListingEditor').classList.contains('hidden')) initializeListingPinMap(); });
         return;
     }
     if (!listingPinMap) {
         listingPinMap = L.map(container).setView([16.4023, 120.5960], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution:'&copy; OpenStreetMap contributors', maxZoom:19
-        }).addTo(listingPinMap);
+        chooseHomeboundTiles(listingPinMap);
         listingPinMap.on('click', e => setListingPin(e.latlng.lat,e.latlng.lng));
     }
     setTimeout(() => {
@@ -266,6 +437,8 @@ function switchPortal(targetPortal) {
         document.getElementById('btnPortalStudent').className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:text-slate-900 transition flex items-center space-x-1.5';
         document.getElementById('btnPortalOwner').className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-white shadow-sm transition flex items-center space-x-1.5';
         currentPortal = 'owner';
+        closeHomeboundToolPanels();
+        document.getElementById('studentToolAnnouncement')?.classList.add('hidden');
         closeLiveChat();
         renderAdminListings();
         loadOwnerData();
@@ -276,12 +449,13 @@ function switchPortal(targetPortal) {
         document.getElementById('btnPortalStudent').className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-white text-slate-900 shadow-sm transition flex items-center space-x-1.5';
         document.getElementById('btnPortalOwner').className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:text-slate-900 transition flex items-center space-x-1.5';
         currentPortal = 'student';
+        document.getElementById('studentToolAnnouncement')?.classList.remove('hidden');
         setTimeout(() => leafletMap?.invalidateSize(), 80);
     }
     updateAIAssistant();
     renderStudentInbox();
     refreshHoldBanner();
-    if (targetPortal === 'student') {pollStudentInbox();refreshActiveHold();}
+    if (targetPortal === 'student') {pollStudentInbox();refreshActiveHold();if (typeof loadPublicAnnouncements === 'function') void loadPublicAnnouncements();}
 }
 
 function attemptOwnerLogin() {
@@ -368,7 +542,7 @@ function renderListingsGrid(items) {
                         ${escHtml(dorm.type)}
                     </span>
                     <span class="bg-brand-600/90 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg shadow-sm">
-                        ${escHtml(dorm.rooms.some(r => isRoomAvailable(r.status)) ? 'Available' : 'Full / Occupied')}
+                        ${escHtml(dorm.rooms.some(r => isRoomAvailable(r.status)) ? 'Available' : dorm.rooms.some(r=>nextExpectedAvailability(dorm,r)) ? 'Upcoming vacancy' : 'Full / Occupied')}
                     </span>
                 </div>
                 <div class="absolute bottom-2 right-2 bg-slate-900/70 text-white text-[10px] px-2 py-0.5 rounded backdrop-blur-sm">
@@ -411,9 +585,14 @@ function applyFilters() {
     const query = document.getElementById('filterLocation').value.trim().toLocaleLowerCase();
     const priceRange = document.getElementById('filterPriceRange').value;
     const tokens = query.split(/\s+/).filter(Boolean);
+    const selectedPoint = typeof hbStudentSearchPoint !== 'undefined' ? hbStudentSearchPoint : null;
     const filtered = dormsData.filter(d => {
         const searchable = `${d.locationZone || ''} ${d.distance || ''} ${d.title || ''}`.toLocaleLowerCase();
-        if (!tokens.every(token => searchable.includes(token))) return false;
+        const localPart=query.includes(', baguio city') ? query.split(',')[0].trim() : '';
+        const textMatch=tokens.every(token=>searchable.includes(token)) || (localPart && searchable.includes(localPart));
+        const hasPin=d.lat!=null && d.lng!=null && Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lng));
+        const nearby=selectedPoint && hasPin && hbStraightLineKm({lat:Number(d.lat),lng:Number(d.lng)},selectedPoint)<=3;
+        if (!nearby && !textMatch) return false;
         if (priceRange !== 'ALL') {
             const [min,max] = priceRange.split('-').map(Number);
             if (d.maxPrice < min || d.minPrice > max) return false;
@@ -427,6 +606,9 @@ function applyFilters() {
 function resetFilters() {
     document.getElementById('filterLocation').value = '';
     document.getElementById('filterPriceRange').value = 'ALL';
+    if (typeof hbStudentSearchPoint !== 'undefined') hbStudentSearchPoint = null;
+    document.getElementById('studentLocationSuggestions')?.classList.add('hidden');
+    document.getElementById('studentSearchRadius')?.classList.add('hidden');
     applyFilters();
 }
 
@@ -438,7 +620,7 @@ function openBedspaceViewer(dormId) {
     selectedRoomIndex = 0;
 
     document.getElementById('modalDormTitle').innerText = dorm.title;
-    document.getElementById('modalDormSub').innerText = `${dorm.locationZone} • Managed by ${dorm.ownerName}`;
+    document.getElementById('modalDormSub').innerText = dorm.locationZone;
 
     renderRoomDetails();
     renderRoomSelectorList();
@@ -456,6 +638,13 @@ function renderRoomDetails() {
     document.getElementById('modalRoomTypeTag').innerText = activeDormViewing.type;
     document.getElementById('modalRoomDesc').textContent = room.note ? `${room.note} • Status: ${room.status}` : `Room status: ${room.status}`;
     document.getElementById('modalPropertyNote').textContent = activeDormViewing.note || '';
+    document.getElementById('modalOwnerName').textContent = activeDormViewing.ownerName || 'Property manager';
+    const ownerPhoneLink = document.getElementById('modalOwnerPhone');
+    const phone = String(activeDormViewing.ownerPhone || '').trim();
+    ownerPhoneLink.textContent = phone || 'Contact owner through chat';
+    ownerPhoneLink.href = /^\+?[0-9()\s-]{7,35}$/.test(phone) ? `tel:${phone.replace(/[^+\d]/g, '')}` : '#';
+    showExpectedBedAvailability(room);
+    updateRoomMoveInHint();
     document.getElementById('roomActiveImage').src = safeImageUrl(room.images[0]).replaceAll('&amp;', '&');
     const thumbsContainer = document.getElementById('roomThumbnails');
     thumbsContainer.innerHTML = room.images.map((img, idx) => `
@@ -524,6 +713,7 @@ function openPreHoldForm() {
     date.min = localDateISO(new Date());
     if (!date.value || date.value < date.min) date.value = date.min;
     document.getElementById('holdVisitTime').value = '10:00';
+    renderHourlyVisitSlots();
     closeModal('modalBedspaceViewer');
     closeLiveChat();
     document.getElementById('modalPreHoldForm').classList.remove('hidden');
@@ -543,11 +733,21 @@ async function submitHoldRequest(e) {
         showToast('Enter a valid visitation time (HH:MM, such as 09:30).', 'error'); return;
     }
     const visitTime = visitTimeInput.value;
+    if (typeof hbVisitSlotRefreshing !== 'undefined' && (hbVisitSlotRefreshing || !visitTime)) {
+        showToast('Choose an available visitation hour after the schedule loads.', 'error');
+        return;
+    }
+    // Server-side validation also prevents a race when another owner action confirms this hour.
+    if (typeof hbBookedVisitSlots !== 'undefined' && hbBookedVisitSlots.has(visitTime)) {
+        showToast('This visitation hour has already been booked. Choose another available time.', 'error');
+        await refreshVisitSlotAvailability();
+        return;
+    }
     if (!name || !phone || !email || !visitDate || visitDate < localDateISO(new Date())) {
         showToast('Please complete the visitation form with today or a future date.', 'error'); return;
     }
-    if (visitTime < '08:00' || visitTime > '20:00') {
-        showToast('Select a visitation time from 08:00 to 20:00.', 'error'); return;
+    if (visitTime < '08:00' || visitTime > '19:00' || !visitTime.endsWith(':00')) {
+        showToast('Choose a one-hour window starting at 08:00 through 19:00.', 'error'); return;
     }
     const room = activeDormViewing.rooms[selectedRoomIndex];
     const token = crypto.randomUUID();
@@ -595,6 +795,7 @@ async function submitHoldRequest(e) {
         showToast('Your hold request has been submitted.', 'success');
     } catch (err) {
         showToast(`Unable to submit hold request: ${err.message}`, 'error');
+        if (typeof refreshVisitSlotAvailability === 'function') void refreshVisitSlotAvailability();
     } finally {
         button.disabled = false;
         button.textContent = 'Submit Hold Request';
@@ -652,6 +853,7 @@ async function openLiveChat(ownerName) {
     studentChatListingId = dorm.id;
     document.getElementById('chatOwnerTitle').textContent = ownerName || dorm.ownerName || 'Property Owner';
     document.getElementById('chatOwnerAvatar').textContent = (ownerName || dorm.ownerName || 'O')[0];
+    closeHomeboundToolPanels();
     document.getElementById('liveChatDrawer').classList.remove('hidden');
     document.getElementById('modalBedspaceViewer').classList.add('chat-side-open');
     let saved;
@@ -712,17 +914,36 @@ async function sendLiveChatMessage(messageOverride) {
 
 function sendQuickMessage(txt) { sendLiveChatMessage(txt); }
 
+// Image links travel inside the existing chat body; the student RPC already returns body.
+// Uploaded images use the existing public listing-images bucket (do not attach private documents).
+const HB_CHAT_IMAGE_RE = /\n?\[HB_IMAGE:([^\]\r\n]+)\]$/;
+function renderHomeboundChatBody(value) {
+    const message = String(value || '');
+    const match = message.match(HB_CHAT_IMAGE_RE);
+    if (!match) return `<span class="whitespace-pre-wrap">${escHtml(message)}</span>`;
+    const caption = message.slice(0, match.index).trim();
+    // safeImageUrl strictly allows images over HTTPS or browser-managed local previews.
+    const imageSrc = safeImageUrl(match[1]).replaceAll('&amp;', '&');
+    if (imageSrc === FALLBACK_IMAGE) return `<span class="whitespace-pre-wrap">${escHtml(message)}</span>`;
+    return `${caption ? `<p class="whitespace-pre-wrap mb-2">${escHtml(caption)}</p>` : ''}<a href="${escHtml(imageSrc)}" target="_blank" rel="noopener noreferrer" title="Open attached image"><img src="${escHtml(imageSrc)}" loading="lazy" alt="Photo shared by property owner" class="block max-w-full max-h-56 rounded-lg border border-slate-200 object-contain bg-white"></a>`;
+}
 function appendChatMessage(txt, sender, targetId = 'liveChatMessages') {
     const box = document.getElementById(targetId);
     const mine = targetId === 'ownerChatMessages' ? sender === 'owner' : sender === 'student';
     box.insertAdjacentHTML('beforeend', `<div class="flex ${mine ? 'justify-end' : 'justify-start'}">
-      <div class="${mine ? 'bg-brand-600 text-white' : 'bg-white text-slate-800 border border-slate-200'} p-2.5 rounded-2xl max-w-[85%] shadow-sm break-words text-xs">${escHtml(txt)}</div></div>`);
+      <div class="${mine ? 'bg-brand-600 text-white' : 'bg-white text-slate-800 border border-slate-200'} p-2.5 rounded-2xl max-w-[85%] shadow-sm break-words text-xs">${renderHomeboundChatBody(txt)}</div></div>`);
     box.scrollTop = box.scrollHeight;
 }
 
 function toggleAIChat() {
-    const win = document.getElementById('aiAssistantWindow');
-    win.classList.toggle('hidden');
+    const win=document.getElementById('aiAssistantWindow');
+    const opening=win.classList.contains('hidden');
+    closeHomeboundToolPanels();
+    if (opening) {
+        win.classList.remove('hidden');
+        if (window.innerWidth < 960) closeLiveChat();
+    }
+    syncHomeboundToolButtons();
 }
 
 function sendAIPrompt(promptText) {
@@ -899,10 +1120,7 @@ function renderRentTracker() {
         return matching.find(({ payment }) => payment.status === 'Paid') || null;
     }
     function statusBadge(status) {
-        const color = status === 'Paid' ? 'bg-brand-100 text-brand-800'
-            : status === 'Overdue' ? 'bg-rose-100 text-rose-800'
-            : 'bg-amber-100 text-amber-800';
-        return `<span class="inline-block rounded-full px-2 py-1 text-[10px] font-bold ${color}">${escHtml(status)}</span>`;
+        return `<span class="payment-status-text text-slate-700">${escHtml(status)}</span>`;
     }
     function tenancyBadge(tenant) {
         const ended = tenant.status === 'Ended';
@@ -919,8 +1137,8 @@ function renderRentTracker() {
     function paymentActions(item) {
         if (!item) return '';
         const { payment, index } = item;
-        return `${payment.status !== 'Paid' ? `<button type="button" onclick="previewRentReminder(${index})" class="px-2 py-1.5 rounded text-[10px] bg-indigo-600 text-white">Preview Reminder</button>` : ''}
-                <button type="button" onclick="togglePaymentStatus(${index})" class="px-2 py-1.5 rounded text-[10px] ${payment.status === 'Paid' ? 'bg-slate-200 text-slate-700' : 'bg-brand-600 text-white'}">${payment.status === 'Paid' ? 'Undo Paid' : 'Mark Paid'}</button>`;
+        return `${payment.status !== 'Paid' ? `<button type="button" onclick="previewRentReminder(${index})" class="simple-icon-btn" title="Preview rent reminder" aria-label="Preview rent reminder"><i class="fa-solid fa-bell"></i></button>` : ''}
+                <button type="button" onclick="togglePaymentStatus(${index})" class="simple-icon-btn" title="${payment.status === 'Paid' ? 'Undo paid status' : 'Mark as paid'}" aria-label="${payment.status === 'Paid' ? 'Undo paid status' : 'Mark as paid'}"><i class="fa-solid fa-${payment.status === 'Paid' ? 'rotate-left' : 'check'}"></i></button>`;
     }
 
     body.innerHTML = tenants.length ? tenants.map(tenant => {
@@ -930,15 +1148,16 @@ function renderRentTracker() {
         const open = expandedTenantPaymentHistory.has(tenant.id);
         const overdueCount = items.filter(({ payment }) => payment.status === 'Overdue').length;
         const endButton = tenant.status === 'Active'
-            ? `<button type="button" onclick="endTenantAssignment('${escHtml(tenant.id)}')" class="px-2 py-1.5 rounded text-[10px] bg-rose-50 border border-rose-200 text-rose-700">End Tenancy</button>` : '';
-        const historyButton = `<button type="button" aria-expanded="${open}" aria-controls="tenant-history-${escHtml(tenant.id)}" onclick="toggleTenantPaymentHistory('${escHtml(tenant.id)}')" class="px-2 py-1.5 rounded text-[10px] bg-slate-100 border border-slate-200 text-slate-700">${open ? 'Hide Details' : 'View Record'} (${items.length} dues)</button>`;
+            ? `<button type="button" onclick="endTenantAssignment('${escHtml(tenant.id)}')" class="simple-icon-btn text-rose-700" title="End tenancy" aria-label="End tenancy"><i class="fa-solid fa-door-open"></i></button>` : '';
+        const historyButton = `<button type="button" aria-expanded="${open}" aria-controls="tenant-history-${escHtml(tenant.id)}" onclick="toggleTenantPaymentHistory('${escHtml(tenant.id)}')" class="simple-icon-btn" title="${open ? 'Hide record' : `View record (${items.length} dues)`}" aria-label="${open ? 'Hide record' : 'View record'}"><i class="fa-solid fa-${open ? 'chevron-up' : 'file-lines'}"></i></button>`;
         const history = open ? `<tr id="tenant-history-${escHtml(tenant.id)}" class="bg-slate-50">
-            <td colspan="6" class="px-4 py-3">
+            <td colspan="7" class="px-4 py-3">
                 <div class="mb-3 rounded-lg border border-slate-200 bg-white p-3">
                     <p class="text-[11px] font-bold text-slate-800 mb-2">Tenancy record — ${escHtml(tenant.tenant_name)} ${tenancyBadge(tenant)}</p>
                     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-2 text-[11px] text-slate-700">
                         <div><strong>Start date:</strong> ${escHtml(tenant.start_date || 'Not recorded')}</div>
                         <div><strong>End date:</strong> ${escHtml(tenant.end_date || (tenant.status === 'Active' ? 'Ongoing' : 'Not recorded'))}</div>
+                        <div><strong>Expected move-out:</strong> ${escHtml(tenant.planned_end_date || 'Not specified')}</div>
                         <div><strong>Tenancy length:</strong> ${escHtml(tenureLength(tenant))}</div>
                         <div><strong>Assigned bed:</strong> ${escHtml(tenant.bed_slot || 'Not recorded')}</div>
                         <div><strong>Monthly due day:</strong> ${escHtml(tenant.due_day || 'Not recorded')}</div>
@@ -971,6 +1190,7 @@ function renderRentTracker() {
                 <span class="block text-[10px] text-slate-500">Started: ${escHtml(tenant.start_date || 'Not recorded')}</span>
                 ${tenant.status === 'Ended' ? `<span class="block text-[10px] font-semibold text-slate-600">Ended: ${escHtml(tenant.end_date || 'Not recorded')}</span>` : ''}</td>
             <td class="p-3 font-semibold whitespace-nowrap">${escHtml(formatPeso(tenant.monthly_rent))}</td>
+            <td class="p-3 whitespace-nowrap text-slate-600">${escHtml(tenant.status==='Ended' ? (tenant.end_date || 'Ended') : (tenant.planned_end_date || 'Not recorded'))}</td>
             <td class="p-3 whitespace-nowrap">${due ? escHtml(due.dueDate) : 'No due generated'}
                 ${overdueCount > 1 && filter === 'all' ? `<span class="block text-[10px] text-rose-600">${overdueCount} overdue dues</span>` : ''}</td>
             <td class="p-3">${due ? statusBadge(due.status) : '<span class="text-slate-400">—</span>'}</td>
@@ -978,7 +1198,7 @@ function renderRentTracker() {
                 ${paymentActions(focus)}${historyButton}${endButton}
             </div></td>
         </tr>${history}`;
-    }).join('') : `<tr><td colspan="6" class="p-6 text-center text-slate-500">${filter === 'all'
+    }).join('') : `<tr><td colspan="7" class="p-6 text-center text-slate-500">${filter === 'all'
         ? 'No tenancy records match the selected filters. Assign a tenant from My Property Listings.'
         : 'No tenancy records match the selected payment and tenancy filters.'}</td></tr>`;
 
@@ -988,11 +1208,9 @@ function renderRentTracker() {
     const overdue = all.filter(payment => payment.status === 'Overdue');
     const paid = all.filter(payment => payment.status === 'Paid');
     const blocks = [
-        ['Active Tenants', active.length, 'Current room assignments'],
-        ['Ended Tenancies', ended.length, 'Historical tenancy records retained'],
+        ['Active / Ended', `${active.length} / ${ended.length}`, 'Current / archived tenancies'],
         ['Unpaid Dues', formatPeso(unpaid.reduce((sum, payment) => sum + payment.amount, 0)), 'Pending and overdue'],
-        ['Overdue Dues', formatPeso(overdue.reduce((sum, payment) => sum + payment.amount, 0)), `${overdue.length} overdue monthly record(s)`],
-        ['Recorded Paid', formatPeso(paid.reduce((sum, payment) => sum + payment.amount, 0)), 'Marked paid by landlord']
+        ['Overdue Dues', formatPeso(overdue.reduce((sum, payment) => sum + payment.amount, 0)), `${overdue.length} overdue records`]
     ];
     document.getElementById('rentTrackerSummary').innerHTML = blocks.map(([title, value, detail]) => `
         <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
@@ -1054,6 +1272,14 @@ function openTenantAssignmentModal(holdIndex = null, preferredListingId = null) 
     document.getElementById('tenantEmail').value=hold?.student_email || hold?.studentEmail || '';
     const today=currentPhilippineDate();
     document.getElementById('tenantMoveIn').value=today;
+    const planned=document.getElementById('tenantPlannedEnd');
+    planned.value='';
+    planned.min=today;
+    planned.max=localDateISO(new Date(Date.now()+730*86400000));
+    document.getElementById('tenantMoveIn').onchange=()=>{
+        planned.min=document.getElementById('tenantMoveIn').value>today?document.getElementById('tenantMoveIn').value:today;
+        if(planned.value && planned.value<planned.min)planned.value='';
+    };
     document.getElementById('tenantDueDay').value=String(Number(today.slice(8,10)));
     const linked = document.getElementById('tenantAssignedFromHold');
     linked.classList.toggle('hidden',!hold);
@@ -1122,7 +1348,13 @@ async function submitTenantAssignment(event) {
         startDate:document.getElementById('tenantMoveIn').value,
         dueDay:Number(document.getElementById('tenantDueDay').value),
         monthlyRent:Number(document.getElementById('tenantMonthlyRent').value),
-        holdId:pendingRentalHoldId};
+        holdId:pendingRentalHoldId,
+        plannedEndDate: document.getElementById('tenantPlannedEnd')?.value || null};
+    if (!payload.plannedEndDate) {showToast('Expected move-out date is required for future vacancy records.', 'error');return;}
+    if (payload.plannedEndDate < currentPhilippineDate() || payload.plannedEndDate > localDateISO(new Date(Date.now()+730*86400000))) {showToast('Expected move-out date must be within the next two years.','error');return;}
+    if (payload.plannedEndDate && payload.plannedEndDate < payload.startDate) {
+        showToast('Expected move-out must not be before the move-in date.','error');return;
+    }
     if (payload.phone.length<7 || !Number.isInteger(payload.dueDay) ||
         payload.dueDay<1 || payload.dueDay>31 || !Number.isInteger(payload.monthlyRent) ||
         payload.monthlyRent<=0 || payload.monthlyRent>10000000) {
@@ -1144,13 +1376,22 @@ async function submitTenantAssignment(event) {
         } else {
             if (availableRentalSlots(id,room)<=0)
                 throw new Error('This room or bedspace is fully assigned.');
+            const advanceMatch=hbDemoAdvance?.find(r=>r.listingId===id && r.roomName===roomName && r.bedSlot===bedSlot && r.status==='Approved');
+            if (advanceMatch && (advanceMatch.email.toLowerCase()!==payload.email.toLowerCase() || payload.startDate < advanceMatch.moveIn))
+                throw new Error('This bed has an approved advance reservation for another student.');
+            if (advanceMatch) {
+                advanceMatch.status='Fulfilled';
+                const reserved=room.beds.find(b=>b.id===bedSlot);
+                if(reserved) delete reserved.reservedFor;
+            }
             tenantRecords.push({id:crypto.randomUUID(),listing_id:id,room_name:roomName,
                 bed_slot:bedSlot,
                 tenant_name:payload.tenantName,tenant_phone:payload.phone,
                 tenant_email:payload.email,monthly_rent:payload.monthlyRent,
                 start_date:payload.startDate,due_day:payload.dueDay,status:'Active',
-                end_date:null,source_hold_id:payload.holdId});
+                end_date:null,planned_end_date:payload.plannedEndDate,announcement_token:crypto.randomUUID(),source_hold_id:payload.holdId});
             room.beds.find(b=>b.id===bedSlot).status='Occupied';
+            if (payload.plannedEndDate) room.beds.find(b=>b.id===bedSlot).availableFrom=payload.plannedEndDate;
             if (payload.holdId) {
                 const hold=visitationsList.find(h=>h.id===payload.holdId);
                 if (hold) hold.status='Rented';
@@ -1187,7 +1428,7 @@ async function endTenantAssignment(tenancyId) {
             tenant.status='Ended';tenant.end_date=currentPhilippineDate();
             const room = dormsData.find(d=>d.id===tenant.listing_id)?.rooms.find(r=>r.name===tenant.room_name);
             const bed = room?.beds?.find(b=>b.id===tenant.bed_slot);
-            if (bed) bed.status='Available';
+            if (bed) {bed.status='Available';delete bed.availableFrom;}
             rentRecords=rentRecords.filter(r=>r.tenancy_id!==tenant.id ||
                 r.paid_at || r.due_date<=tenant.end_date);
             updateDemoRoomOccupancy(tenant.listing_id,tenant.room_name);
@@ -1218,7 +1459,7 @@ async function loadOwnerRentData() {
 
 
 function switchAdminTab(tabName) {
-    for (const name of ['Visitations','Payments','Listings','Chats','Analytics']) {
+    for (const name of ['Visitations','Reservations','Payments','Listings','Chats','Analytics','Announcements']) {
         document.getElementById(`tabContent${name}`).classList.add('hidden');
         const btn = document.getElementById(`tabBtn${name}`);
         btn.className = 'admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap';
@@ -1229,8 +1470,20 @@ function switchAdminTab(tabName) {
     if (tabName === 'listings') renderAdminListings();
     if (tabName === 'chats') loadOwnerInbox();
     if (tabName === 'visitations') loadOwnerHolds();
-    if (tabName === 'payments' && HomeboundStore.configured && activeOwner) loadOwnerRentData();
-    if (tabName === 'analytics') requestAnimationFrame(renderAnalytics);
+    if (tabName === 'payments' && HomeboundStore.configured && activeOwner) {
+        HomeboundStore.activateDueReservations().catch(e=>console.warn('Activation check:',e.message)).finally(loadOwnerRentData);
+    }
+    if (tabName === 'analytics') requestAnimationFrame(() => {
+        renderAnalytics();renderHomeboundForecast();
+        setAnalyticsView(document.getElementById('analyticsViewFilter').value);
+        if(!window.Chart) loadHomeboundChartLibrary().then(loaded=>{
+            const notice=document.getElementById('analyticsChartNotice');
+            if(notice){notice.classList.toggle('hidden',loaded);}
+            if(loaded){renderAnalytics();renderHomeboundForecast();setAnalyticsView(document.getElementById('analyticsViewFilter').value);}
+        });
+    });
+    if (tabName === 'announcements') loadTenantAnnouncements();
+    if (tabName === 'reservations') loadAdvanceReservations();
 }
 
 function renderAdminTables() {
@@ -1247,9 +1500,13 @@ function renderAdminTables() {
           <td class="p-3 whitespace-nowrap">${escHtml(v.visitDate || v.visit_date)}<br>${escHtml(v.visitSlot || formatVisitTime(v.visit_time || v.visitTime))}</td>
           <td class="p-3">${escHtml(v.studentPhone || v.student_phone)}</td>
           <td class="p-3 font-semibold">${escHtml(status)}</td>
-          <td class="p-3 text-right space-x-2">${isPending ? `<button onclick="updateVisitStatus(${i}, 'Confirmed Visit')" class="bg-brand-600 text-white px-2 py-1 rounded text-[10px] font-bold">Approve</button>
+          <td class="p-3 text-right">${isPending ? `<button onclick="updateVisitStatus(${i}, 'Confirmed Visit')" class="bg-brand-600 text-white px-2 py-1 rounded text-[10px] font-bold">Approve</button>
             <button onclick="updateVisitStatus(${i}, 'Declined')" class="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[10px] font-bold">Decline</button>`
-            : status === 'Confirmed Visit' ? `<button type="button" onclick="openTenantAssignmentModal(${i})" class="bg-indigo-600 text-white px-3 py-1.5 rounded text-[10px] font-bold">Assign Tenant / Rent</button>`
+            : status === 'Confirmed Visit' ? `<div class="inline-flex items-center justify-end gap-2 whitespace-nowrap">
+                <button type="button" onclick="markVisitationCompleted(${i})" class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 transition" title="Mark Visited — release this visitation time slot" aria-label="Mark Visited"><i class="fa-solid fa-check-double" aria-hidden="true"></i></button>
+                <button type="button" onclick="openTenantAssignmentModal(${i})" class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition" title="Assign Tenant / Rent" aria-label="Assign Tenant / Rent"><i class="fa-solid fa-user-plus" aria-hidden="true"></i></button>
+                </div>`
+            : status === 'Visited' ? '<span class="text-slate-600 text-[10px]">Visit completed</span>'
             : '<span class="text-slate-400 text-[10px]">Reviewed</span>'}</td>
         </tr>`;
     }).join('') : '<tr><td colspan="6" class="p-5 text-center text-slate-400">No visitation requests yet.</td></tr>';
@@ -1292,6 +1549,39 @@ async function updateVisitStatus(idx, newStatus) {
         refreshDashboardStats();
         showToast(`Visitation marked as ${newStatus}.`, 'success');
     } catch (err) { showToast(`Could not update request: ${err.message}`, 'error'); }
+}
+
+// Completing a visit frees the confirmed one-hour slot without deleting visit history.
+async function markVisitationCompleted(index) {
+    const hold = getOwnerHoldList()[index];
+    if (!hold || hold.status !== 'Confirmed Visit') return;
+    try {
+        if (HomeboundStore.configured) {
+            const changed = await HomeboundStore.completeVisit(hold.id);
+            if (!changed) throw new Error('The visit was already updated. Reload the visits list.');
+            await loadOwnerHolds();
+        } else {
+            hold.status = 'Visited';
+            const studentCopy = studentHolds.find(h => h.id === hold.id);
+            if (studentCopy) {
+                studentCopy.status = 'Visited';
+                studentCopy.statusUpdatedAt = new Date().toISOString();
+                saveStudentHolds();
+                refreshHoldBanner();
+            }
+            const conv = demoConversations.find(c => c.id === hold.conversationId);
+            if (conv) {
+                conv.messages.push({id:crypto.randomUUID(), sender:'system',
+                    body:`Homebound update: Your visit for ${hold.roomName || hold.room_name} is marked completed.`,
+                    created_at:new Date().toISOString()});
+            }
+            renderAdminTables();
+        }
+        showToast('Visit marked completed. The time slot is available for new visits.', 'success');
+        if (typeof refreshVisitSlotAvailability === 'function') void refreshVisitSlotAvailability();
+    } catch (err) {
+        showToast(`Could not complete visit: ${err.message}`, 'error');
+    }
 }
 
 async function togglePaymentStatus(idx) {
@@ -1359,7 +1649,7 @@ function renderAdminListings() {
         const availableBeds = beds.filter(b => b.status === 'Available').length;
         const hasAvailable = d.rooms.some(r => isRoomAvailable(r.status));
         return `
-        <article class="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm${expanded?' md:col-span-2':''}">
+        <article class="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
             <button type="button"
                 onclick="toggleOwnerListingDetails(${index})"
                 aria-expanded="${expanded}"
@@ -1382,7 +1672,7 @@ function renderAdminListings() {
                 </div>
             </button>
             <div id="ownerListingDetails-${index}"
-                class="${expanded?'':'hidden '}border-t border-slate-100 px-4 pb-4 pt-3 space-y-3">
+                class="owner-listing-expansion ${expanded?'':'hidden '}border-t border-slate-100 px-4 pb-4 pt-3 space-y-3">
                 <div class="flex flex-wrap justify-between items-center gap-2 text-xs">
                     <span class="font-semibold text-slate-700">Global Availability:</span>
                     <button type="button" onclick="toggleDormAvailability(${index})" class="${hasAvailable?'bg-brand-600 hover:bg-brand-700':'bg-slate-600 hover:bg-slate-700'} text-white text-[10px] font-bold px-3 py-1.5 rounded-lg">
@@ -1394,11 +1684,12 @@ function renderAdminListings() {
                         <div class="flex justify-between gap-2 mb-2"><strong class="text-xs">${escHtml(r.name)}</strong>
                             <span class="text-[11px] font-semibold text-brand-700">${displayBedSlots(r).filter(b=>b.status==='Available').length} / ${displayBedSlots(r).length} available</span></div>
                         <div class="flex gap-2 flex-wrap">${displayBedSlots(r).map(b => `<button type="button"
-                            ${b.status==='Occupied'?'disabled title="Occupied by an active tenant"':''}
+                            ${b.status==='Occupied'||b.reservedFor?'disabled title="Occupied or has an approved advance reservation"':''}
                             onclick="toggleBedAvailability(${bedActionParams(d.id,r.name,b.id)})"
                             aria-pressed="${b.status==='Unavailable'}"
                             class="rounded-lg px-3 py-2 text-[11px] font-semibold border ${b.status==='Occupied'?'bg-slate-300 text-slate-600 cursor-not-allowed':b.status==='Available'?'bg-brand-50 border-brand-300 text-brand-800 hover:bg-brand-100':'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'}">
-                            ${escHtml(b.id.replace('bed-','Bed '))}: ${escHtml(b.status)}</button>`).join('')}</div>
+                            ${escHtml(b.id.replace('bed-','Bed '))}: ${escHtml(b.reservedFor ? `Reserved ${b.reservedFor}` : b.status)}</button>`).join('')}</div>
+                        <button type="button" onclick="hbCalOpenOwner(${bedActionParams(d.id,r.name)})" class="mt-2 text-[11px] font-bold text-brand-700 hover:underline"><i class="fa-regular fa-calendar-days mr-1"></i>Availability calendar</button>
                     </div>`).join('')}
                 </div>
                 <div class="flex flex-wrap gap-2 text-xs">
@@ -1415,7 +1706,7 @@ async function toggleBedAvailability(listingId, roomName, bedSlot) {
     const listing = getOwnerListings().find(d=>d.id===listingId);
     const room = listing?.rooms.find(r=>r.name===roomName);
     const bed = displayBedSlots(room).find(b=>b.id===bedSlot);
-    if (!bed || bed.status==='Occupied') {
+    if (!bed || bed.status==='Occupied' || bed.reservedFor) {
         showToast('Occupied beds can only be reopened by ending the tenancy.', 'error'); return;
     }
     const available = bed.status !== 'Available';
@@ -1535,9 +1826,9 @@ function addListingRoom(room = {}) {
         <button type="button" onclick="removeListingRoom(${index})" class="text-rose-700 font-semibold">Remove room</button>
       </div>
       <div class="grid sm:grid-cols-2 gap-3">
-        <label class="font-semibold">Room Name *<input class="input-editor room-name" required value="${escHtml(room.name || '')}" placeholder="Room 101 - Twin Sharing"></label>
-        <label class="font-semibold">Monthly Price (PHP) *<input class="input-editor room-price price-no-spinner" type="number" min="0" step="1" required value="${Number(room.price || 0)}"></label>
-        <label class="font-semibold">Total Bed Capacity *<input class="input-editor room-capacity price-no-spinner" type="number" min="1" max="100" step="1" required value="${el.bedSlots.length}" oninput="regenerateRoomBedSlots(${index},this)"></label>
+        <label class="font-semibold">Room Name <span class="required-mark">*</span><input class="input-editor room-name" required value="${escHtml(room.name || '')}" placeholder="Room 101 - Twin Sharing"></label>
+        <label class="font-semibold">Monthly Price (PHP) <span class="required-mark">*</span><input class="input-editor room-price price-no-spinner" type="number" min="0" step="1" required value="${Number(room.price || 0)}"></label>
+        <label class="font-semibold">Total Bed Capacity <span class="required-mark">*</span><input class="input-editor room-capacity price-no-spinner" type="number" min="1" max="100" step="1" required value="${el.bedSlots.length}" oninput="regenerateRoomBedSlots(${index},this)"></label>
         <label class="font-semibold sm:col-span-2">Additional Notes (optional)<textarea class="input-editor room-note" maxlength="600" rows="2" placeholder="Bathroom details, house rules, allowed occupants...">${escHtml(room.note || '')}</textarea></label>
       </div>
       <div><strong class="block font-semibold mb-2">Individual Bed Slots</strong>
@@ -1565,15 +1856,15 @@ function renderRoomEditorBedSlots(index) {
     const el=document.getElementById(`editorRoom-${index}`);
     const list=document.getElementById(`editorRoomBeds-${index}`);
     if (!el || !list) return;
-    list.innerHTML=el.bedSlots.map((b,i)=>`<button type="button" ${b.status==='Occupied'?'disabled title="End tenancy to free this bed"':''}
+    list.innerHTML=el.bedSlots.map((b,i)=>`<button type="button" ${b.status==='Occupied'||b.reservedFor?'disabled title="Bed occupied or reserved"':''}
       onclick="toggleRoomEditorBed(${index},${i})"
       class="px-3 py-2 rounded-lg border text-[11px] font-semibold ${b.status==='Occupied'?'bg-slate-200 border-slate-300 text-slate-600 cursor-not-allowed':b.status==='Available'?'bg-brand-50 border-brand-200 text-brand-800':'bg-amber-50 border-amber-200 text-amber-900'}">
-      Bed ${i+1}: ${escHtml(b.status)}</button>`).join('');
+      Bed ${i+1}: ${escHtml(b.reservedFor ? `Reserved ${b.reservedFor}` : b.status)}</button>`).join('');
 }
 function toggleRoomEditorBed(index,slotIndex) {
     const el=document.getElementById(`editorRoom-${index}`);
     const bed=el?.bedSlots?.[slotIndex];
-    if (!bed || bed.status==='Occupied') return;
+    if (!bed || bed.status==='Occupied' || bed.reservedFor) return;
     bed.status=bed.status==='Available'?'Unavailable':'Available';
     renderRoomEditorBedSlots(index);
 }
@@ -1614,6 +1905,7 @@ async function saveListing(event) {
     const button = document.getElementById('saveListingButton');
     try {
         if (!roomEls.length) throw new Error('Each property needs at least one room.');
+        if (field('listingPhone').length < 7) throw new Error('Enter a valid owner contact phone number.');
         const prepared = roomEls.map(el => {
             const read = className => el.querySelector('.' + className).value.trim();
             const priceText = read('room-price');
@@ -1714,8 +2006,16 @@ function initAnalyticsCharts() { renderAnalytics(); }
 
 function printAnalyticsReport() {
     document.getElementById('analyticsPeriod').textContent = `Prepared ${new Date().toLocaleString('en-PH', {dateStyle:'long',timeStyle:'short'})}`;
-    renderAnalytics();
-    requestAnimationFrame(() => window.print());
+    // Print the COMPLETE formal report, not just the currently selected tab.
+    const category = document.getElementById('analyticsViewFilter').value;
+    document.querySelectorAll('[data-analytics-view]').forEach(p=>p.classList.remove('hidden'));
+    renderAnalytics();renderHomeboundForecast();
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+        reportCharts.forEach(chart=>{try {chart.resize();}catch(_){}});
+        try {hbForecastChart?.resize();}catch(_){}
+        window.addEventListener('afterprint',()=>setAnalyticsView(category),{once:true});
+        window.print();
+    }));
 }
 
 /* ==========================================================================
@@ -1763,7 +2063,7 @@ function restoreActiveHold() {
     if (HomeboundStore.configured && studentHolds.length) refreshActiveHold();
 }
 function holdStatusLabel(status) {
-    return ({'Pending Approval':'Pending owner review','Confirmed Visit':'Approved',
+    return ({'Pending Approval':'Pending owner review','Confirmed Visit':'Approved','Visited':'Visit completed',
         'Declined':'Declined','Cancelled by Student':'Cancelled','Expired':'Expired','Rented':'Rented'})[status] || status || 'Pending';
 }
 function holdStatusColor(status) {
@@ -1854,7 +2154,11 @@ async function loadOwnerHolds() {
     refreshDashboardStats();
 }
 async function loadOwnerData() {
-    await Promise.all([loadOwnerInbox(),loadOwnerHolds(),loadOwnerRentData()]);
+    if (HomeboundStore.configured && activeOwner) {
+        try { await HomeboundStore.activateDueReservations(); }
+        catch (e) { console.warn('Scheduled reservation activation:', e.message); }
+    }
+    await Promise.all([loadOwnerInbox(),loadOwnerHolds(),loadOwnerRentData(),loadAdvanceReservations()]);
     refreshDashboardStats();
     renderAnalytics();
 }
@@ -2099,17 +2403,24 @@ function readSavedStudentConversations() {
 function renderStudentInbox() {
     const floating=document.getElementById('studentInboxFloating');
     if (!floating) return;
-    floating.classList.toggle('hidden',currentPortal!=='student' || !studentInboxRecords.some(r=>r.hasOwnerReply));
+    floating.classList.toggle('hidden',currentPortal!=='student');
     const total=studentInboxRecords.reduce((sum,r)=>sum+r.unread,0);
     const badge=document.getElementById('studentUnreadBadge');
     badge.classList.toggle('hidden',!total);
     badge.textContent=String(Math.min(total,99));
+    const advanceListingIds=new Set((typeof hbStudentAdvanceRecords!=='undefined'?hbStudentAdvanceRecords:[])
+        .map(r=>r.listingId).filter(Boolean));
+    const extraAdvance=[...advanceListingIds].filter(id=>!studentInboxRecords.some(r=>r.listingId===id));
     document.getElementById('studentInboxList').innerHTML=studentInboxRecords.map(r =>
         `<button type="button" onclick="openStudentConversation(${bedActionParams(r.listingId)})"
           class="flex items-center justify-between gap-2 w-full text-left border border-slate-200 hover:bg-brand-50 rounded-lg p-2">
             <span class="font-semibold">${escHtml(lookupPropertyName(r.listingId))}</span>
             ${r.unread ? `<span class="bg-rose-600 text-white text-[10px] rounded-full px-2 py-1">${r.unread} new</span>` : '<span class="text-slate-500 text-[10px]">Open chat</span>'}
-          </button>`).join('');
+          </button>`).join('') + extraAdvance.map(id=>
+        `<button type="button" onclick="openStudentConversation(${bedActionParams(id)})" class="w-full text-left border border-slate-200 rounded-lg p-2 hover:bg-brand-50"><strong>${escHtml(lookupPropertyName(id))}</strong><span class="block text-[11px] text-slate-500">Advance request status · Open conversation</span></button>`
+    ).join('');
+    if(!studentInboxRecords.length && !extraAdvance.length)
+        document.getElementById('studentInboxList').innerHTML='<p class="text-xs text-slate-500 p-2">No conversations yet. Open a listing and select “Ask Owner A Question” to start one.</p>';
 }
 async function pollStudentInbox() {
     if (studentInboxBusy) return;
@@ -2132,10 +2443,47 @@ async function pollStudentInbox() {
         renderStudentInbox();
     } finally { studentInboxBusy=false; }
 }
+function toggleCommunityUpdates() {
+    if (currentPortal !== 'student') return;
+    const panel = document.getElementById('studentAnnouncementSection');
+    if (!panel) return;
+    const opening = panel.classList.contains('hidden');
+    closeHomeboundToolPanels();
+    if (opening) {
+        panel.classList.remove('hidden');
+        if (typeof loadPublicAnnouncements === 'function') void loadPublicAnnouncements();
+        if (typeof hbMarkPublicAnnouncementsRead === 'function') hbMarkPublicAnnouncementsRead();
+    }
+    syncHomeboundToolButtons();
+}
+function closeHomeboundToolPanels() {
+    document.getElementById('studentAnnouncementSection')?.classList.add('hidden');
+    document.getElementById('studentInboxPanel')?.classList.add('hidden');
+    document.getElementById('aiAssistantWindow')?.classList.add('hidden');
+    syncHomeboundToolButtons();
+}
+function syncHomeboundToolButtons() {
+    for (const [target, panel] of [
+        ['studentToolAnnouncement', 'studentAnnouncementSection'],
+        ['studentInboxFloating', 'studentInboxPanel'],
+        ['homeboundFloatingTools', 'aiAssistantWindow']
+    ]) {
+        const host = document.getElementById(target);
+        const button = target === 'homeboundFloatingTools' ? host?.querySelector('[aria-controls="aiAssistantWindow"]') : host?.querySelector('button');
+        button?.setAttribute('aria-expanded', String(!document.getElementById(panel)?.classList.contains('hidden')));
+    }
+}
 function toggleStudentInbox() {
+    if (currentPortal !== 'student') return;
     const panel=document.getElementById('studentInboxPanel');
-    panel.classList.toggle('hidden');
-    if (!panel.classList.contains('hidden')) pollStudentInbox();
+    const opening=panel.classList.contains('hidden');
+    closeHomeboundToolPanels();
+    if (opening) {
+        panel.classList.remove('hidden');
+        closeLiveChat();
+        void pollStudentInbox();
+    }
+    syncHomeboundToolButtons();
 }
 async function openStudentConversation(listingId) {
     const dorm=dormsData.find(d=>d.id===listingId);
@@ -2168,6 +2516,7 @@ async function refreshStudentChat() {
         const box = document.getElementById('liveChatMessages');
         box.innerHTML = messages.length ? '' : '<p class="text-center text-slate-400 text-xs">Ask a question about this property to start a conversation.</p>';
         messages.forEach(m => appendChatMessage(m.body,m.sender));
+        if(typeof renderAdvanceChatStatuses==='function') renderAdvanceChatStatuses();
         if (currentPortal==='student') markStudentChatSeen(messages);
     } catch (err) { console.warn('Chat refresh failed:',err.message); }
 }
@@ -2193,6 +2542,7 @@ async function openOwnerConversation(id,refreshList = true) {
     ownerConversationId = id;
     document.getElementById('ownerChatInput').disabled = false;
     document.getElementById('ownerChatSend').disabled = false;
+    document.getElementById('ownerChatImage').disabled = false;
     const conv = ownerConversations.find(c => c.id===id);
     document.getElementById('ownerConversationTitle').textContent = `Conversation about ${conv?.listings?.title || lookupPropertyName(conv?.listing_id)}`;
     const box = document.getElementById('ownerChatMessages');
@@ -2206,26 +2556,92 @@ async function openOwnerConversation(id,refreshList = true) {
         }
     } catch (err) { showToast(`Could not open chat: ${err.message}`, 'error'); }
 }
+let ownerImagePreviewUrl = null;
+// Keep attachment action visible, even before the landlord has selected a chat.
+function openOwnerImagePicker() {
+    if (!ownerConversationId) {
+        showToast('Select a student conversation first, then attach a photo.', 'info');
+        return;
+    }
+    const input = document.getElementById('ownerChatImage');
+    if (!input) {
+        showToast('The photo picker could not be found. Refresh Homebound.', 'error');
+        return;
+    }
+    input.disabled = false;
+    input.click();
+}
+function clearOwnerImageAttachment() {
+    if (ownerImagePreviewUrl) URL.revokeObjectURL(ownerImagePreviewUrl);
+    ownerImagePreviewUrl = null;
+    const input = document.getElementById('ownerChatImage');
+    if (input) input.value = '';
+    document.getElementById('ownerImagePreview')?.classList.add('hidden');
+    const thumb = document.getElementById('ownerImageThumbnail');
+    if (thumb) thumb.removeAttribute('src');
+}
+function previewOwnerChatImage(input) {
+    const file = input?.files?.[0];
+    if (!file) { clearOwnerImageAttachment(); return; }
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || !file.size || file.size > 5 * 1024 * 1024) {
+        clearOwnerImageAttachment();
+        showToast('Choose a JPG, PNG, or WEBP image smaller than 5 MB.', 'error');
+        return;
+    }
+    if (ownerImagePreviewUrl) URL.revokeObjectURL(ownerImagePreviewUrl);
+    ownerImagePreviewUrl = URL.createObjectURL(file);
+    document.getElementById('ownerImageThumbnail').src = ownerImagePreviewUrl;
+    document.getElementById('ownerImageFileName').textContent = file.name;
+    document.getElementById('ownerImagePreview').classList.remove('hidden');
+}
+function readDemoChatImage(file) {
+    return new Promise((resolve,reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error('Could not preview attached image.'));
+        reader.readAsDataURL(file);
+    });
+}
 async function sendOwnerReply(e) {
     e.preventDefault();
     const input = document.getElementById('ownerChatInput');
+    const imageInput = document.getElementById('ownerChatImage');
+    const imageFile = imageInput?.files?.[0] || null;
     const message = input.value.trim();
-    if (!ownerConversationId || !message) return;
+    if (!ownerConversationId || (!message && !imageFile)) return;
+    const sendButton = document.getElementById('ownerChatSend');
     input.disabled = true;
+    imageInput.disabled = true;
+    sendButton.disabled = true;
     try {
-        if (HomeboundStore.configured) await HomeboundStore.ownerReply(ownerConversationId,message);
+        let body = message;
+        if (imageFile) {
+            const url = HomeboundStore.configured
+                ? await HomeboundStore.uploadImage(imageFile)
+                : await readDemoChatImage(imageFile);
+            body = `${message}${message ? '\n' : ''}[HB_IMAGE:${url}]`;
+        }
+        if (HomeboundStore.configured) await HomeboundStore.ownerReply(ownerConversationId, body);
         else {
-            const conversation = demoConversations.find(c => c.id===ownerConversationId);
-            conversation.messages.push({id:crypto.randomUUID(), sender:'owner',body:message,created_at:new Date().toISOString()});
+            const conversation = demoConversations.find(c => c.id === ownerConversationId);
+            if (!conversation) throw new Error('Conversation not found. Refresh your inbox.');
+            conversation.messages.push({id: crypto.randomUUID(), sender: 'owner', body,
+                created_at: new Date().toISOString()});
             conversation.updatedAt = new Date().toISOString();
         }
-        input.value='';
+        input.value = '';
+        clearOwnerImageAttachment();
         await openOwnerConversation(ownerConversationId);
         await loadOwnerInbox();
         refreshStudentChat();
         pollStudentInbox();
+        showToast('Message sent.', 'success');
     } catch (err) { showToast(`Reply not sent: ${err.message}`, 'error'); }
-    finally { input.disabled=false; }
+    finally {
+        input.disabled = false;
+        imageInput.disabled = !ownerConversationId;
+        sendButton.disabled = !ownerConversationId;
+    }
 }
 function updateAIAssistant() {
     if (aiContext === currentPortal) return;
@@ -2281,17 +2697,24 @@ function renderAnalytics() {
     document.getElementById('analyticsSource').textContent = HomeboundStore.configured ?
         'Source: Live owner listings, submitted hold requests and student conversations in Supabase.' :
         'Source: Local sample properties, sample visitations and conversations in this browser. Not historical operating data.';
+    const dueRecords=getPaymentViewRecords();
+    const pastDue=dueRecords.filter(p=>p.status==='Overdue');
+    const openBeds=rooms.reduce((sum,r)=>sum+displayBedSlots(r).filter(b=>b.status==='Available').length,0);
+    const totalBeds=rooms.reduce((sum,r)=>sum+displayBedSlots(r).length,0);
     document.getElementById('analyticsKpis').innerHTML = [
-        analyticsKpi('Listed Properties',listings.length,'Properties managed'),
-        analyticsKpi('Rooms Available',`${availableRooms.length}/${rooms.length}`,`${availabilityPct}% of listed rooms`),
-        analyticsKpi('Student Inquiries',chats.length,'Unique conversations'),
-        analyticsKpi('Pending Visits',pending,'Requests awaiting review'),
-        analyticsKpi('Active Renters',tenantRecords.filter(t=>t.status==='Active').length,'Current tenant assignments'),
-        analyticsKpi('Ended Tenancies',endedTenancies.length,'Historical tenancy records'),
-        analyticsKpi('Avg. Completed Stay',avgEndedDays,'Based on recorded start and end dates'),
-        analyticsKpi('Overdue Rent',formatPeso(getPaymentViewRecords().filter(p=>p.status==='Overdue').reduce((sum,p)=>sum+p.amount,0)),'Outstanding past-due amounts')
+        analyticsKpi('Properties',listings.length,'Managed listings'),
+        analyticsKpi('Beds available',`${openBeds}/${totalBeds}`,'Current open bed slots'),
+        analyticsKpi('Active tenants',tenantRecords.filter(t=>t.status==='Active').length,`${endedTenancies.length} historical tenancies`),
+        analyticsKpi('Pending visits',pending,'Awaiting review'),
+        analyticsKpi('Student inquiries',chats.length,'Recorded conversations'),
+        analyticsKpi('Overdue rent',formatPeso(pastDue.reduce((sum,p)=>sum+p.amount,0)),`${pastDue.length} payment records`)
     ].join('');
-    const monthKeys = Array.from({length:6},(_,i)=>{const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-(5-i));return {key:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,label:d.toLocaleString('en-PH',{month:'short',year:'2-digit'})};});
+    const monthsShown = Math.max(3,Math.min(12,Number(document.getElementById('analyticsMonthRange')?.value || 6)));
+    const monthKeys=Array.from({length:monthsShown},(_,i)=>{
+        const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-(monthsShown-1-i));
+        return {key:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,
+            label:d.toLocaleString('en-PH',{month:'short',year:'numeric'})};
+    });
     const inquiries = monthKeys.map(m => chats.filter(c => (c.created_at || c.updatedAt || '').startsWith(m.key)).length);
     const types = ['Dormitory','Bedspace','Apartment'];
     const typeCount = types.map(t => listings.filter(d=>d.type===t).reduce((n,d)=>n+d.rooms.length,0));
@@ -2312,7 +2735,7 @@ function renderAnalytics() {
     if (endedTenancies.length) recommendations.push(analyticsAdvice('Review tenancy turnover',
         `${endedTenancies.length} tenancy record(s) have ended. Use their start and end dates to review stay duration and plan vacancy marketing.`));
     if (rooms.length > 1) recommendations.push(analyticsAdvice('Review your advertised rent',`The average room rate is ₱${Math.round(rateTotal/rooms.length).toLocaleString()}/month. Compare rates against facilities and nearby properties; this is not collected revenue.`));
-    document.getElementById('analyticsRecommendations').innerHTML = recommendations.join('');
+    document.getElementById('analyticsRecommendations').innerHTML = recommendations.slice(0,3).join('');
     const propertyRows = listings.map(d => `<tr class="border-b border-slate-100"><td class="p-2 font-semibold">${escHtml(d.title)}</td>
         <td class="p-2">${d.rooms.length}</td><td class="p-2">${d.rooms.filter(r=>isRoomAvailable(r.status)).length}</td>
         <td class="p-2">${escHtml(d.priceRangeStr)}</td>

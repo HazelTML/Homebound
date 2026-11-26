@@ -2,6 +2,7 @@
 <html lang="en" class="h-full bg-slate-50">
 <head>
     <meta charset="UTF-8">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Homebound - Centralized University Housing & Management</title>
     
@@ -79,49 +80,65 @@
 <!-- STUDENT PORTAL MAIN VIEW -->
 <main id="studentPortalView" class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 
-    <!-- Compact Homebound welcome banner / free-text search -->
-    <section class="homebound-hero bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-4 sm:p-5 text-white shadow-lg">
-        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-4">
-            <div>
-                <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight">Where comfort meets convenience.</h1>
-                <p class="text-slate-300 text-xs sm:text-sm mt-1">Explore rooms and bedspaces, compare prices, and find your next home.</p>
+    <!-- Student homepage: welcoming image-led hero. Search IDs and callbacks are unchanged. -->
+    <section class="homebound-hero" aria-labelledby="homeboundHeroTitle">
+        <div class="homebound-hero-content">
+            <p class="homebound-hero-eyebrow">HOMEBOUND · BAGUIO CITY</p>
+            <h1 id="homeboundHeroTitle">Find your next place<br class="hidden sm:block"> to call home.</h1>
+            <p class="homebound-hero-intro">Where comfort meets convenience. Discover dorms, rooms, and bedspaces that feel right for you.</p>
+
+            <div class="hero-search" role="search" aria-label="Search Homebound rental listings">
+                <div class="hero-search-field hero-search-location">
+                    <label for="filterLocation">Location or nearby landmark</label>
+                    <div class="hero-input-wrap">
+                        <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+                        <input id="filterLocation" type="search" oninput="queueStudentLocationSuggestions(this.value);applyFilters()"
+                            placeholder="Search Irisan, Session Road, or a campus" autocomplete="off"
+                            aria-controls="studentLocationSuggestions" aria-label="Search a Baguio location"
+                            class="hero-search-input">
+                    </div>
+                    <div id="studentLocationSuggestions" class="location-suggestions hidden" role="listbox" aria-label="Suggested Baguio locations"></div>
+                    <span id="studentSearchRadius" class="hero-search-radius hidden"></span>
+                </div>
+
+                <div class="hero-search-field">
+                    <label for="filterPriceRange">Monthly budget</label>
+                    <select id="filterPriceRange" onchange="applyFilters()" class="hero-budget-select">
+                        <option value="ALL">Any budget</option>
+                        <option value="0-3000">Up to ₱3,000</option>
+                        <option value="3000-5000">₱3,000–₱5,000</option>
+                        <option value="5000-10000">₱5,000–₱10,000</option>
+                        <option value="10000-999999999">₱10,000 and above</option>
+                    </select>
+                </div>
+
+                <div class="hero-search-actions">
+                    <button type="button" onclick="resetFilters()" class="hero-reset-button" title="Clear location and budget filters">
+                        <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reset
+                    </button>
+                    <a href="#listingsHeading" class="hero-browse-button">Explore homes <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a>
+                </div>
             </div>
-        </div>
-        <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,220px)_110px] items-end gap-3">
-            <label class="block text-xs font-semibold text-slate-200">Search location or nearby landmark
-                <input id="filterLocation" type="search" oninput="applyFilters()" placeholder="Enter any city, barangay, street, campus or landmark" autocomplete="off"
-                    class="mt-1 w-full bg-white text-slate-900 border border-slate-200 rounded-xl text-sm px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500">
-            </label>
-            <label class="block text-xs font-semibold text-slate-200">Monthly budget
-                <select id="filterPriceRange" onchange="applyFilters()" class="mt-1 w-full bg-white text-slate-900 border border-slate-200 rounded-xl text-sm px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500">
-                    <option value="ALL">Any budget</option>
-                    <option value="0-3000">Up to ₱3,000</option>
-                    <option value="3000-5000">₱3,000–₱5,000</option>
-                    <option value="5000-10000">₱5,000–₱10,000</option>
-                    <option value="10000-999999999">₱10,000 and above</option>
-                </select>
-            </label>
-            <button type="button" onclick="resetFilters()" class="bg-slate-700 hover:bg-slate-600 border border-slate-500 text-white rounded-xl text-xs font-semibold py-3 px-3 transition">
-                <i class="fa-solid fa-rotate-left mr-1"></i> Reset
-            </button>
         </div>
     </section>
 
-    <!-- Map & Toggle Section -->
-    <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm space-y-3">
-        <div class="flex items-center justify-between">
-            <h2 class="text-sm font-bold uppercase tracking-wider text-slate-500 flex items-center">
-                <i class="fa-solid fa-map-location-dot text-brand-600 mr-2"></i> Baguio City Property Map
-            </h2>
-            <span class="text-xs text-slate-400">Click any property pin to view its listing</span>
+    <!-- Full-width interactive Baguio property map. -->
+    <div class="hb-discovery-row">
+      <section class="hb-map-card bg-white rounded-2xl p-4 border border-slate-200 shadow-sm" aria-label="Baguio property map">
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-slate-600"><i class="fa-solid fa-map-location-dot text-brand-600 mr-2"></i>Baguio City Property Map</h2>
+          <span id="mapPinCount" class="text-xs text-slate-500">Click a pin to inspect</span>
         </div>
-        <div id="map"></div>
+        <div class="relative hb-map-canvas"><div id="map" role="application" aria-label="Interactive map of Baguio properties"></div><div id="mapStatus" role="status" class="map-status hidden"><span id="mapStatusText"></span><button type="button" class="underline font-semibold ml-2" onclick="retryHomeboundMap()">Retry map</button></div></div>
+      </section>
+
+
     </div>
 
     <!-- Listings Grid Header -->
     <div class="flex items-center justify-between">
         <div>
-            <h2 class="text-xl font-bold text-slate-900">Available Dorms & Bedspaces</h2>
+            <h2 id="listingsHeading" class="text-xl font-bold text-slate-900">Available Dorms & Bedspaces</h2>
             <p class="text-xs text-slate-500"><span id="listingSourceText">Demo sample listings. Connect Supabase for live owner updates.</span></p>
         </div>
         <div class="text-xs text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full font-medium">
@@ -144,10 +161,10 @@
         <div>
             <div class="flex items-center space-x-2 text-brand-400 text-xs font-bold uppercase tracking-wider mb-1">
                 <span class="w-2 h-2 rounded-full bg-brand-500 animate-ping"></span>
-                <span>Owner Centralized Management Dashboard</span>
+                <span>Homebound Manager</span>
             </div>
-            <h1 class="text-2xl font-bold">University Belt Landlord Portal</h1>
-            <p class="text-xs text-slate-400">Manage properties, student inquiries, visitation requests, and rental records from one dashboard.</p>
+            <h1 class="text-2xl font-bold">Property overview</h1>
+            <p class="text-sm text-slate-300">The essentials for your rentals, in one place.</p>
         </div>
         
         <div class="flex items-center space-x-3">
@@ -158,12 +175,12 @@
     </div>
 
     <!-- Overview Stat Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
             <div>
                 <span class="text-xs font-semibold text-slate-400 uppercase">Rooms Available</span>
                 <p class="text-2xl font-black text-slate-900" id="statOccupancy">—</p>
-                <span class="text-[10px] text-brand-600 font-semibold">Live availability from room records</span>
+                <span class="text-[10px] text-brand-600 font-semibold">Updated from room records</span>
             </div>
             <div class="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center text-brand-600 font-bold">
                 <i class="fa-solid fa-bed text-lg"></i>
@@ -174,7 +191,7 @@
             <div>
                 <span class="text-xs font-semibold text-slate-400 uppercase">Contracted Monthly Rent</span>
                 <p class="text-2xl font-black text-slate-900" id="statRevenue">—</p>
-                <span class="text-[10px] text-slate-400">Agreed rent for active tenants, not collected cash</span>
+                <span class="text-[10px] text-slate-400">Active tenant agreements</span>
             </div>
             <div class="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 font-bold">
                 <i class="fa-solid fa-peso-sign text-lg"></i>
@@ -183,25 +200,16 @@
 
         <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
             <div>
-                <span class="text-xs font-semibold text-slate-400 uppercase">Pending Visits</span>
+                <span class="text-xs font-semibold text-slate-400 uppercase">Visit / Hold Requests</span>
                 <p class="text-2xl font-black text-amber-600" id="statPendingVisits">3</p>
-                <span class="text-[10px] font-semibold text-amber-600">Requires review</span>
+                <span class="text-[10px] font-semibold text-amber-600">Awaiting owner decision</span>
             </div>
             <div class="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 font-bold">
                 <i class="fa-solid fa-calendar-day text-lg"></i>
             </div>
         </div>
 
-        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-            <div>
-                <span class="text-xs font-semibold text-slate-400 uppercase">Active Holds</span>
-                <p class="text-2xl font-black text-blue-600" id="statActiveHolds">2</p>
-                <span class="text-[10px] text-slate-400">Student hold requests</span>
-            </div>
-            <div class="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 font-bold">
-                <i class="fa-solid fa-hand-holding-hand text-lg"></i>
-            </div>
-        </div>
+        <span id="statActiveHolds" class="hidden" aria-hidden="true">0</span>
 
         <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
             <div>
@@ -225,9 +233,10 @@
                 <span>Visitations & Hold Requests</span>
                 <span id="badgeVisitCount" class="bg-brand-100 text-brand-800 text-[10px] px-2 py-0.5 rounded-full font-extrabold">3</span>
             </button>
+            <button onclick="switchAdminTab('reservations')" id="tabBtnReservations" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap"><i class="fa-solid fa-calendar-check"></i><span>Reservations</span><span id="badgeReservationCount" class="bg-amber-100 text-amber-900 text-[10px] px-2 py-0.5 rounded-full">0</span></button>
             <button onclick="switchAdminTab('payments')" id="tabBtnPayments" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap">
                 <i class="fa-solid fa-receipt"></i>
-                <span>Payment Tracker & SMS Alerts</span>
+                <span>Tenants & Payments</span>
                 <span id="badgeOverdueCount" class="bg-rose-100 text-rose-800 text-[10px] px-2 py-0.5 rounded-full font-extrabold">2</span>
             </button>
             <button onclick="switchAdminTab('listings')" id="tabBtnListings" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap">
@@ -237,9 +246,10 @@
             <button onclick="switchAdminTab('chats')" id="tabBtnChats" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap">
                 <i class="fa-solid fa-comments"></i><span>Student Messages</span><span id="badgeChatCount" class="bg-brand-100 text-brand-800 text-[10px] px-2 py-0.5 rounded-full">0</span>
             </button>
+            <button onclick="switchAdminTab('announcements')" id="tabBtnAnnouncements" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap"><i class="fa-solid fa-bullhorn"></i><span>Announcements</span></button>
             <button onclick="switchAdminTab('analytics')" id="tabBtnAnalytics" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap">
                 <i class="fa-solid fa-chart-line"></i>
-                <span>Seasonal Influx & Analytics</span>
+                <span>Analytics</span>
             </button>
         </div>
 
@@ -248,7 +258,7 @@
             <div class="flex items-center justify-between">
                 <div>
                     <h3 class="font-bold text-slate-900 text-base">Incoming Student Visitation & Hold Requests</h3>
-                    <p class="text-xs text-slate-500">Prototype requests in this browser session only; not stored or sent to landlords.</p>
+                    <p class="text-sm text-slate-500">Approve or decline student visit requests.</p>
                 </div>
             </div>
 
@@ -271,12 +281,17 @@
             </div>
         </div>
 
+        <!-- Reservations are reviewed separately from visitation holds. -->
+        <div id="tabContentReservations" class="hidden p-6 space-y-4">
+          <div class="flex items-center justify-between gap-2"><div><h3 class="font-bold text-slate-900">Advance Reservations</h3><p class="text-xs text-slate-500">Review dates and rent terms. Visits are managed separately.</p></div><button type="button" class="simple-icon-btn" onclick="loadAdvanceReservations()" title="Refresh reservations" aria-label="Refresh reservations"><i class="fa-solid fa-rotate"></i></button></div>
+          <div class="space-y-2" id="advanceOwnerList"><p class="text-xs text-slate-500">No advance requests.</p></div>
+        </div>
         <!-- Tab 2: Tenant Register + Automatic Payment Tracker -->
         <div id="tabContentPayments" class="hidden p-6 space-y-5">
             <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                 <div>
                     <h3 class="font-bold text-slate-900 text-base">Tenant Register & Monthly Rent Tracker</h3>
-                    <p class="text-xs text-slate-500 mt-1">When a student agrees to rent, assign their exact room and record their move-in date. Monthly dues will appear here automatically.</p>
+                    <p class="text-sm text-slate-500 mt-1">Tenancy records and monthly dues, together.</p>
                 </div>
                 <span class="text-[11px] text-slate-500">Assign tenants from <strong>My Property Listings</strong>.</span>
             </div>
@@ -284,23 +299,24 @@
                 <i class="fa-solid fa-circle-info text-blue-600 text-base mt-0.5"></i>
                 <p><strong>Rent monitoring, not payment collection.</strong> Rent records are generated from saved tenant assignments. Mark payments as paid after verifying them with the tenant. "Preview Reminder" shows suggested SMS text; it does not send a message or transfer money.</p>
             </div>
-            <div id="rentTrackerSummary" class="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-live="polite"></div>
+            <div id="rentTrackerSummary" class="hidden" aria-hidden="true"></div>
             <!-- One tenant row with the most relevant due; history expands on demand. -->
             <div class="space-y-3">
                 <div class="flex flex-wrap justify-between gap-2 items-center">
                     <div>
                         <h4 class="font-bold text-slate-900">Tenants & Monthly Rent</h4>
-                        <p class="text-xs text-slate-500 mt-1">Each active or ended tenancy appears once. Expand View Record to see start/end dates, assigned bed, contact details, and payment history.</p>
+                        <p class="text-xs text-slate-500 mt-1">Select a record for full tenancy and payment history.</p>
                     </div>
-                    <div class="flex flex-wrap gap-2 items-center">
-                        <label class="text-xs text-slate-600">Tenancy
+                    <div class="rent-filters flex flex-wrap gap-2 items-center rounded-xl border border-emerald-200 bg-emerald-50 p-2">
+                        <span class="text-xs font-bold text-emerald-800"><i class="fa-solid fa-filter mr-1"></i>Filter records</span>
+                        <label class="text-xs text-slate-700 font-semibold">Tenancy
                             <select id="tenancyStatusFilter" class="border border-slate-300 rounded-md px-2 py-1 ml-1 bg-white" onchange="renderAdminTables()">
                                 <option value="all">Active & Ended</option>
                                 <option value="active">Active only</option>
                                 <option value="ended">Ended only</option>
                             </select>
                         </label>
-                        <label class="text-xs text-slate-600">Payments
+                        <label class="text-xs text-slate-700 font-semibold">Payments
                             <select id="paymentStatusFilter" class="border border-slate-300 rounded-md px-2 py-1 ml-1 bg-white" onchange="renderAdminTables()">
                                 <option value="all">All dues</option>
                                 <option value="pending">Pending</option>
@@ -316,7 +332,7 @@
                             <th class="p-3 rounded-l-lg">Tenant</th>
                             <th class="p-3">Property / Room</th>
                             <th class="p-3">Monthly Rent</th>
-                            <th class="p-3">Relevant Due</th>
+                            <th class="p-3">Expected Move-out</th><th class="p-3">Relevant Due</th>
                             <th class="p-3">Payment Status</th>
                             <th class="p-3 rounded-r-lg text-right">Actions</th>
                         </tr></thead>
@@ -332,7 +348,7 @@
                 <h3 class="font-bold text-slate-900 text-base">Active Property Inventory</h3>
                 <span class="text-xs text-slate-500">Live toggles immediately update availability on student searches</span>
             </div>
-            <div id="adminListingsContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div id="adminListingsContainer" class="flex flex-col gap-3">
                 <!-- Javascript Populated -->
             </div>
         </div>
@@ -343,113 +359,159 @@
                 <div><h3 class="text-base font-bold text-slate-900">Student Messages</h3><p class="text-xs text-slate-500">View questions about your properties and reply directly.</p></div>
                 <button type="button" onclick="loadOwnerInbox()" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 border rounded-lg text-xs font-bold">Refresh inbox</button>
             </div>
-            <div class="grid grid-cols-1 lg:grid-cols-[250px_minmax(0,1fr)] gap-4 min-h-[330px]">
+            <div class="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-3 min-h-[360px]">
                 <div id="ownerConversationList" class="space-y-2 overflow-y-auto max-h-[450px] border border-slate-200 rounded-xl p-2 bg-slate-50"><p class="text-xs text-slate-400 p-3">No messages yet.</p></div>
                 <div class="border border-slate-200 rounded-xl flex flex-col overflow-hidden bg-white min-h-[350px]">
                     <div class="px-4 py-3 border-b border-slate-100 bg-slate-50 text-xs font-bold" id="ownerConversationTitle">Choose a conversation</div>
-                    <div id="ownerChatMessages" class="flex-1 p-4 overflow-y-auto space-y-3 max-h-[320px] text-xs"></div>
-                    <form onsubmit="sendOwnerReply(event)" class="flex gap-2 p-3 border-t border-slate-200">
-                        <input id="ownerChatInput" required maxlength="2000" placeholder="Write a response to the student..." class="input-editor !mt-0 flex-1" disabled>
-                        <button id="ownerChatSend" disabled type="submit" class="bg-brand-600 disabled:opacity-50 text-white rounded-lg px-4 font-bold text-xs">Reply</button>
+                    <div id="ownerChatMessages" class="flex-1 p-4 overflow-y-auto space-y-3 max-h-[400px] text-sm bg-slate-50"></div>
+                    <div id="ownerImagePreview" class="hidden px-3 pt-3 border-t border-slate-100 flex items-center gap-3 text-xs">
+                        <img id="ownerImageThumbnail" class="w-14 h-14 rounded-lg object-cover border border-slate-200" alt="Selected attachment preview">
+                        <span id="ownerImageFileName" class="min-w-0 flex-1 truncate text-slate-600"></span>
+                        <button type="button" onclick="clearOwnerImageAttachment()" class="text-rose-700 font-semibold" aria-label="Remove selected image">Remove</button>
+                    </div>
+                    <form onsubmit="sendOwnerReply(event)" class="flex items-center gap-2 p-3 border-t border-slate-200">
+                        <button type="button" id="ownerAttachPhotoButton" onclick="openOwnerImagePicker()" class="shrink-0 inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600" title="Attach photo (JPG, PNG or WEBP, up to 5 MB)" aria-label="Attach photo to owner reply">
+                            <i class="fa-solid fa-paperclip" aria-hidden="true"></i><span>Attach photo</span>
+                        </button>
+                        <input id="ownerChatImage" type="file" accept="image/jpeg,image/png,image/webp" onchange="previewOwnerChatImage(this)" class="sr-only" disabled>
+                        <input id="ownerChatInput" maxlength="1800" placeholder="Write a message or attach a photo..." class="input-editor !mt-0 min-w-0 flex-1" disabled>
+                        <button id="ownerChatSend" disabled type="submit" class="bg-brand-600 disabled:opacity-50 text-white rounded-lg px-4 py-2 font-bold text-xs">Send</button>
                     </form>
                 </div>
             </div>
         </div>
 
-        <!-- Prescriptive landlord analytics; numbers generated from saved records -->
-        <section id="tabContentAnalytics" class="hidden p-6 space-y-6 analytics-report">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
-                <div>
-                    <p class="text-xs uppercase tracking-widest text-brand-700 font-bold">HOMEBOUND / PROPERTY PERFORMANCE REPORT</p>
-                    <h3 class="text-xl font-bold text-slate-900">Owner Analytics & Recommendations</h3>
-                    <p class="text-xs text-slate-500" id="analyticsPeriod">Generated from listing and inquiry records</p>
-                </div>
-                <button type="button" onclick="printAnalyticsReport()" class="print-hide bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl"><i class="fa-solid fa-print mr-2"></i>Print Analytics Report</button>
+        <!-- Focused analytics: show one report category at a time -->
+        <section id="tabContentAnalytics" class="hidden p-5 space-y-4 analytics-report">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+            <div><p class="text-xs uppercase font-bold tracking-widest text-emerald-700">Homebound / Management Report</p>
+              <h3 class="text-xl font-bold">Analytics & forecasting</h3><p id="analyticsPeriod" class="text-xs text-slate-500"></p></div>
+            <div class="flex flex-wrap items-center gap-2 print-hide">
+              <label class="text-xs font-semibold">Inquiries
+                <select id="analyticsMonthRange" onchange="renderAnalytics()" class="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm ml-1">
+                  <option value="3">3 months</option><option value="6" selected>6 months</option><option value="12">12 months</option>
+                </select></label>
+              <label class="text-xs font-semibold">View
+                <select id="analyticsViewFilter" onchange="setAnalyticsView(this.value)" class="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm ml-1">
+                  <option value="overview">Highlights</option><option value="all">All reports</option><option value="demand">Student demand</option>
+                  <option value="rent">Rent & forecast</option><option value="properties">By property</option>
+                </select></label>
+              <button type="button" onclick="printAnalyticsReport()" class="simple-icon-btn" title="Print report" aria-label="Print analytics report"><i class="fa-solid fa-print"></i></button>
             </div>
-            <div id="analyticsSource" class="text-xs text-slate-500"></div>
-            <div id="analyticsKpis" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                <div class="analytics-panel"><h4>Monthly Inquiries</h4><p>Student conversations created by month</p><div class="h-60"><canvas id="chartSeasonalInflux"></canvas></div></div>
-                <div class="analytics-panel"><h4>Room Availability by Property Type</h4><p>Current available and unavailable units</p><div class="h-60"><canvas id="chartRoomShare"></canvas></div></div>
-                <div class="analytics-panel"><h4>Monthly Rent Distribution</h4><p>Count of rooms by advertised price band</p><div class="h-60"><canvas id="chartPriceBands"></canvas></div></div>
-                <div class="analytics-panel"><h4>Visitation Request Outcomes</h4><p>Pending, approved, declined, and cancelled requests</p><div class="h-60"><canvas id="chartHoldOutcomes"></canvas></div></div>
-            </div>
-            <div class="analytics-panel">
-                <h4>Actionable Management Recommendations</h4>
-                <div id="analyticsRecommendations" class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs"></div>
-            </div>
-            <div class="analytics-panel"><h4>Property Performance Snapshot</h4>
-                <div class="overflow-x-auto mt-3"><table class="w-full text-left text-xs"><thead class="bg-slate-100"><tr><th class="p-2">Property</th><th class="p-2">Rooms</th><th class="p-2">Available</th><th class="p-2">Published Rent Range</th><th class="p-2">Inquiries</th><th class="p-2">Hold Requests</th></tr></thead><tbody id="analyticsPropertyRows"></tbody></table></div>
-            </div>
-            <p class="text-xs text-slate-500">Methodology: figures use the listings, inquiries and requests currently accessible to this landlord. Advertised room rates are not actual revenue, and availability status does not verify physical occupancy.</p>
+          </div>
+          <p id="analyticsSource" class="text-xs text-slate-500"></p>
+          <p id="analyticsChartNotice" class="hidden rounded-lg bg-amber-50 border border-amber-200 text-amber-900 p-3 text-xs">Chart library unavailable. Summary figures and month-by-month tables remain available. Check your internet connection to display charts.</p>
+          <div id="analyticsKpis" class="analytics-kpis grid grid-cols-2 lg:grid-cols-4 gap-3"></div>
+          <div data-analytics-view="overview" class="analytics-view space-y-3">
+            <div class="analytics-panel"><h4>Where to focus</h4><div id="analyticsRecommendations" class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm"></div></div>
+          </div>
+          <div data-analytics-view="demand" class="analytics-view hidden grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div class="analytics-panel"><h4>Monthly student inquiries</h4><p>Month and year, from recorded conversations</p><div class="h-64"><canvas id="chartSeasonalInflux"></canvas></div><div class="text-xs text-slate-500 mt-2">Month-by-month counts use recorded conversation dates.</div></div>
+            <div class="analytics-panel"><h4>Visitation outcomes</h4><p>Requests by actual review status</p><div class="h-64"><canvas id="chartHoldOutcomes"></canvas></div></div>
+          </div>
+          <div data-analytics-view="rent" class="analytics-view hidden space-y-3">
+            <div id="forecastSummary" class="grid grid-cols-1 md:grid-cols-3 gap-3"></div>
+            <div class="analytics-panel"><h4>Monthly recorded dues & estimated contracted rent</h4><p id="forecastNote">Historical amounts use recorded due dates; future values are projections, not collected income.</p><div class="h-72"><canvas id="chartRentMonthly"></canvas></div><div class="overflow-x-auto"><table class="w-full text-left text-xs mt-3"><thead><tr class="border-b"><th class="p-2">Month</th><th class="p-2">Recorded dues</th><th class="p-2">Projected contractual rent</th><th class="p-2">Basis</th></tr></thead><tbody id="forecastMonthlyRows"></tbody></table></div></div>
+            <div class="analytics-panel"><h4>Advertised room rates</h4><p>Room counts by price range</p><div class="h-60"><canvas id="chartPriceBands"></canvas></div></div>
+          </div>
+          <div data-analytics-view="properties" class="analytics-view hidden space-y-3">
+            <div class="analytics-panel"><h4>Room supply by type</h4><div class="h-56"><canvas id="chartRoomShare"></canvas></div></div>
+            <div class="analytics-panel"><h4>Property performance</h4><div class="overflow-x-auto mt-3"><table class="w-full text-left text-sm"><thead class="bg-slate-100"><tr><th class="p-2">Property</th><th class="p-2">Rooms</th><th class="p-2">Available</th><th class="p-2">Rent range</th><th class="p-2">Inquiries</th><th class="p-2">Visits</th></tr></thead><tbody id="analyticsPropertyRows"></tbody></table></div></div>
+          </div>
+          <p class="text-xs text-slate-500">Only recorded information is shown. Forecasts assume active contracts continue unless a planned end date is entered.</p>
         </section>
-
+        <section id="tabContentAnnouncements" class="hidden p-5 space-y-4">
+          <div><h3 class="text-lg font-bold">Tenant announcement board</h3><p class="text-sm text-slate-500">Post updates for all active tenants or a single property. Tenants can read updates through their private link.</p></div>
+          <form id="announcementForm" onsubmit="submitTenantAnnouncement(event)" class="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-xl border bg-slate-50 p-4 text-sm">
+            <label class="font-semibold">Audience <span class="required-mark">*</span><select id="announcementAudience" required onchange="syncAnnouncementVisibility()" class="input-editor"><option value="all">All active tenants</option></select></label>
+            <label class="font-semibold">Subject <span class="required-mark">*</span><input id="announcementTitle" maxlength="120" required class="input-editor" placeholder="e.g. Water interruption"></label>
+            <label class="md:col-span-2 font-semibold">Message <span class="required-mark">*</span><textarea id="announcementBody" maxlength="1500" rows="3" required class="input-editor" placeholder="Include date, time and any steps tenants should take"></textarea></label>
+            <div class="md:col-span-2 space-y-2">
+              <div class="flex items-center gap-3 flex-wrap">
+                <label for="announcementPhotoFile" class="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:border-green-600 hover:bg-green-50 focus-within:ring-2 focus-within:ring-green-500">
+                  <i class="fa-solid fa-image text-green-700" aria-hidden="true"></i> Attach photo (optional)
+                  <input id="announcementPhotoFile" type="file" accept="image/jpeg,image/png,image/webp" class="sr-only" onchange="previewAnnouncementPhoto(this)">
+                </label>
+                <span class="text-xs text-slate-500">JPG, PNG or WebP · up to 5 MB</span>
+              </div>
+              <div id="announcementPhotoPreview" class="hidden flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2" role="status">
+                <img id="announcementPhotoThumb" alt="Selected announcement photo" class="h-20 w-28 rounded-md object-cover">
+                <div class="min-w-0 flex-1"><p id="announcementPhotoName" class="truncate text-xs font-semibold text-slate-700"></p><p class="text-xs text-slate-500">Attached to this announcement</p></div>
+                <button type="button" onclick="clearAnnouncementPhoto()" class="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100" aria-label="Remove announcement photo">Remove</button>
+              </div>
+            </div>
+            <label id="publicAnnouncementOption" class="md:col-span-2 flex items-center gap-2 text-xs font-semibold text-slate-700"><input type="checkbox" id="announcementPublic" class="accent-green-700" checked> Display universal notice on the student Community Updates board</label>
+            <div class="md:col-span-2 flex justify-between items-center gap-3"><span class="text-xs text-slate-500">Universal notices are public by default; uncheck to keep them tenant-only. Property-specific notices always stay private.</span>
+            <button class="rounded-lg bg-brand-600 hover:bg-brand-700 px-4 py-2 text-white font-bold" type="submit">Publish</button></div>
+          </form>
+          <div id="ownerAnnouncements" class="space-y-2 text-sm"></div>
+        </section>
     </div>
 
 </main>
 
-<!-- STUDENT INBOX: a distinct button above the AI assistant, visible for student conversations. -->
-<div id="studentInboxFloating" class="hidden fixed bottom-24 right-5 z-[55]">
-  <button type="button" onclick="toggleStudentInbox()" aria-label="Open student messages" title="Your messages from property owners"
-      class="relative flex items-center justify-center w-14 h-14 rounded-full bg-slate-900 hover:bg-slate-800 text-white shadow-xl border-2 border-white">
-    <i class="fa-solid fa-message text-xl"></i>
-    <span id="studentUnreadBadge" class="hidden absolute -top-2 -right-2 min-w-6 h-6 rounded-full bg-rose-600 text-white text-xs font-bold flex items-center justify-center px-1">0</span>
-  </button>
-  <div id="studentInboxPanel" class="hidden absolute bottom-16 right-0 w-80 max-w-[calc(100vw-2rem)] max-h-80 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl p-3 text-xs">
-    <div class="flex justify-between items-center mb-2"><strong class="text-slate-900">Your property conversations</strong>
-      <button type="button" onclick="toggleStudentInbox()" aria-label="Close inbox" class="text-slate-500"><i class="fa-solid fa-xmark"></i></button></div>
-    <div id="studentInboxList" class="space-y-2"></div>
+<!-- Persistent student quick-access tools. Only one panel opens at a time. -->
+<div id="homeboundFloatingTools" class="hb-floating-tools" aria-label="Homebound quick-access tools">
+  <div id="studentToolAnnouncement" class="hb-tool-item">
+    <button type="button" class="hb-floating-button" onclick="toggleCommunityUpdates()" aria-label="Community announcements" aria-controls="studentAnnouncementSection" aria-expanded="false" title="Community announcements">
+      <i class="fa-solid fa-bullhorn" aria-hidden="true"></i>
+      <span id="announcementUnreadBadge" class="hidden hb-tool-unread" aria-live="polite" aria-label="New community announcements">0</span>
+    </button>
+  </div>
+  <div id="studentInboxFloating" class="hb-tool-item">
+    <button type="button" class="hb-floating-button" onclick="toggleStudentInbox()" aria-label="Student messages" aria-controls="studentInboxPanel" aria-expanded="false" title="Student messages">
+      <i class="fa-solid fa-comment-dots" aria-hidden="true"></i>
+      <span id="studentUnreadBadge" class="hidden hb-tool-unread" aria-live="polite">0</span>
+    </button>
+  </div>
+  <div class="hb-tool-item">
+    <button type="button" class="hb-floating-button" onclick="toggleAIChat()" aria-label="Homebound AI assistant" aria-controls="aiAssistantWindow" aria-expanded="false" title="AI assistant">
+      <i class="fa-solid fa-robot" aria-hidden="true"></i>
+    </button>
   </div>
 </div>
-
-<!-- FLOATING AI ASSISTANT WIDGET -->
-<div class="fixed bottom-5 right-5 z-40">
-    <!-- AI Chat Trigger Button -->
-    <button onclick="toggleAIChat()" class="bg-brand-600 hover:bg-brand-700 text-white p-4 rounded-full shadow-2xl shadow-brand-600/50 flex items-center justify-center transition-transform hover:scale-110 relative group">
-        <i class="fa-solid fa-robot text-2xl"></i>
-        <span class="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-400 opacity-75"></span>
-            <span class="relative inline-flex rounded-full h-3.5 w-3.5 bg-brand-500 border-2 border-white"></span>
-        </span>
-        <!-- Hover Tooltip -->
-        <span class="absolute right-16 bg-slate-900 text-white text-[11px] font-bold py-1 px-3 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none shadow-lg">
-            Dorm Unit Assistant
-        </span>
-    </button>
-
-    <!-- AI Floating Window -->
-    <div id="aiAssistantWindow" class="hidden fixed bottom-20 right-5 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col z-50 transition-all transform duration-200" style="height: 480px;">
-        
-        <!-- Header -->
-        <div class="bg-slate-900 p-3.5 text-white flex items-center justify-between border-b border-slate-800">
-            <div class="flex items-center space-x-2.5">
-                <div class="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold text-sm">
-                    <i class="fa-solid fa-robot"></i>
-                </div>
-                <div>
-                    <h4 id="aiAssistantTitle" class="text-xs font-bold leading-tight">Homebound Listing Assistant</h4>
-                    <span class="text-[10px] text-brand-400 flex items-center">
-                        <span class="w-1.5 h-1.5 rounded-full bg-brand-400 mr-1"></span> Context-aware recommendations
+      <section id="studentAnnouncementSection" class="hb-updates-card hb-dock-panel hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" aria-label="Community updates" role="dialog" aria-modal="false">
+        <div class="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <h2 class="font-bold text-slate-900 text-sm"><i class="fa-solid fa-bullhorn text-brand-600 mr-2"></i>Community updates</h2>
+            <p id="publicAnnouncementHeadline" class="text-xs text-slate-500 mt-1" aria-live="polite">Checking for updates…</p>
+          </div>
+          <button type="button" onclick="loadPublicAnnouncements()" class="hb-updates-refresh" title="Refresh public updates" aria-label="Refresh public updates"><i class="fa-solid fa-rotate"></i></button>
+        </div>
+        <div id="publicAnnouncementFeed" class="hb-public-feed space-y-2 text-sm" aria-live="polite"><p class="text-xs text-slate-500">Loading public notices…</p></div>
+      </section>
+<div class="hidden absolute bottom-16 right-0 w-80 max-w-[calc(100vw-2rem)] max-h-80 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl p-3 text-xs" id="studentInboxPanel">
+<div class="flex justify-between items-center mb-2"><strong class="text-slate-900">Your property conversations</strong>
+<button aria-label="Close inbox" class="text-slate-500" onclick="toggleStudentInbox()" type="button"><i class="fa-solid fa-xmark"></i></button></div>
+<div class="space-y-2" id="studentInboxList"></div>
+</div>
+<div class="hidden fixed bottom-20 right-5 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col z-50 transition-all transform duration-200" id="aiAssistantWindow" style="height: 480px;">
+<!-- Header -->
+<div class="bg-slate-900 p-3.5 text-white flex items-center justify-between border-b border-slate-800">
+<div class="flex items-center space-x-2.5">
+<div class="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold text-sm">
+<i class="fa-solid fa-robot"></i>
+</div>
+<div>
+<h4 class="text-xs font-bold leading-tight" id="aiAssistantTitle">Homebound Listing Assistant</h4>
+<span class="text-[10px] text-brand-400 flex items-center">
+<span class="w-1.5 h-1.5 rounded-full bg-brand-400 mr-1"></span> Context-aware recommendations
                     </span>
-                </div>
-            </div>
-            <button onclick="toggleAIChat()" class="text-slate-400 hover:text-white transition">
-                <i class="fa-solid fa-xmark text-lg"></i>
-            </button>
-        </div>
-
-        <!-- Chat Messages Body -->
-        <div id="aiChatBody" class="flex-1 p-3.5 overflow-y-auto space-y-3 bg-slate-50 text-xs"></div>
-
-        <!-- Chat Input Field -->
-        <div class="p-2.5 bg-white border-t border-slate-200 flex items-center space-x-2">
-            <input type="text" id="aiInput" onkeypress="if(event.key==='Enter') sendCustomAIPrompt()" placeholder="Ask AI: e.g. 'Looking for ₱4000 near gate 1'..." class="flex-1 text-xs border border-slate-300 rounded-xl px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:outline-none">
-            <button onclick="sendCustomAIPrompt()" class="bg-brand-600 hover:bg-brand-700 text-white p-2 rounded-xl transition">
-                <i class="fa-solid fa-paper-plane text-xs"></i>
-            </button>
-        </div>
-
-    </div>
+</div>
+</div>
+<button class="text-slate-400 hover:text-white transition" onclick="toggleAIChat()">
+<i class="fa-solid fa-xmark text-lg"></i>
+</button>
+</div>
+<!-- Chat Messages Body -->
+<div class="flex-1 p-3.5 overflow-y-auto space-y-3 bg-slate-50 text-xs" id="aiChatBody"></div>
+<!-- Chat Input Field -->
+<div class="p-2.5 bg-white border-t border-slate-200 flex items-center space-x-2">
+<input class="flex-1 text-xs border border-slate-300 rounded-xl px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:outline-none" id="aiInput" onkeypress="if(event.key==='Enter') sendCustomAIPrompt()" placeholder="Ask AI: e.g. 'Looking for ₱4000 near gate 1'..." type="text"/>
+<button class="bg-brand-600 hover:bg-brand-700 text-white p-2 rounded-xl transition" onclick="sendCustomAIPrompt()">
+<i class="fa-solid fa-paper-plane text-xs"></i>
+</button>
+</div>
 </div>
 
 <!-- INTEGRATED LIVE CHAT DRAWER WITH OWNER -->
@@ -494,13 +556,26 @@
     <div class="room-preview-dialog bg-white rounded-2xl max-w-4xl w-full overflow-hidden shadow-2xl border border-slate-200 my-8 flex flex-col max-h-[90vh]">
         
         <!-- Modal Header -->
-        <div class="bg-slate-900 text-white p-4 flex items-center justify-between shrink-0">
-            <div>
-                <h3 id="modalDormTitle" class="text-lg font-bold">Dorm Title</h3>
-                <p id="modalDormSub" class="text-xs text-slate-400">Detailed Room & Bedspace Granularity Breakdown</p>
+        <div class="bg-slate-900 text-white p-4 flex items-start justify-between gap-3 shrink-0">
+            <div class="min-w-0 flex-1">
+                <h3 id="modalDormTitle" class="text-lg font-bold leading-snug">Dorm Title</h3>
+                <div class="mt-2 flex flex-wrap items-start gap-x-5 gap-y-2 text-xs text-slate-300">
+                    <p class="flex items-center gap-1.5 min-w-0">
+                        <i class="fa-solid fa-location-dot text-emerald-400" aria-hidden="true"></i>
+                        <span id="modalDormSub" class="break-words">Property location</span>
+                    </p>
+                    <div class="flex items-start gap-2 min-w-0" aria-label="Property owner contact">
+                        <i class="fa-solid fa-user text-emerald-400 mt-0.5" aria-hidden="true"></i>
+                        <div class="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+                            <span id="modalOwnerName" class="font-semibold text-white break-words">Property manager</span>
+                            <span class="text-slate-500" aria-hidden="true">·</span>
+                            <a id="modalOwnerPhone" href="#" class="text-emerald-200 hover:text-white underline underline-offset-2 break-all focus:outline-none focus:ring-2 focus:ring-emerald-400 rounded" title="Call property owner">Contact number</a>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <button onclick="closeModal('modalBedspaceViewer')" class="text-slate-400 hover:text-white p-1">
-                <i class="fa-solid fa-xmark text-xl"></i>
+            <button type="button" onclick="closeModal('modalBedspaceViewer')" aria-label="Close room preview" class="text-slate-300 hover:text-white p-1 shrink-0 rounded focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                <i class="fa-solid fa-xmark text-xl" aria-hidden="true"></i>
             </button>
         </div>
 
@@ -532,6 +607,9 @@
                     <p id="modalRoomDesc" class="text-slate-600 leading-relaxed">Spacious room equipped with individual study desks, personal locker closets, and private toilet & bath.</p>
                     
                     <p id="modalPropertyNote" class="text-xs text-slate-500"></p>
+                    <!-- Hidden compatibility target for existing map-distance updates; no notice is shown. -->
+                    <div id="roomExpectedAvailability" class="hidden" aria-hidden="true"></div>
+
                     <div class="grid grid-cols-2 gap-2 text-slate-600 pt-2 border-t border-slate-200">
                         <div><strong class="text-slate-900">Price:</strong> <span id="modalRoomPrice" class="text-brand-700 font-bold">₱2,500/mo</span></div>
                         <div><strong class="text-slate-900">Capacity:</strong> <span id="modalRoomCap">4 Bedspaces</span></div>
@@ -548,6 +626,14 @@
                 </div>
             </div>
 
+            <details class="rounded-xl border border-slate-200 bg-white p-3" id="campusDistanceDetails">
+              <summary class="font-semibold text-sm text-slate-800 cursor-pointer">Distance to campus or landmark</summary>
+              <div class="mt-3"><label class="text-sm">Search a destination
+                <input id="campusDestination" class="input-editor" oninput="queueCampusSuggestions(this.value)" autocomplete="off" placeholder="e.g. University of Baguio"></label>
+                <div id="campusResults" class="location-suggestions hidden"></div>
+                <p id="campusDistanceResult" class="text-xs text-slate-500 mt-2">Select a campus to calculate an approximate distance.</p>
+              </div>
+            </details>
             <!-- Room Selector Tabs (Bedspace Granularity) -->
             <div class="space-y-3">
                 <h4 class="font-bold text-slate-900 text-sm">Select Room Layout / Specific Bedspace:</h4>
@@ -559,14 +645,15 @@
         </div>
 
         <!-- Modal Footer Actions -->
-        <div class="bg-slate-50 p-4 border-t border-slate-200 flex items-center justify-between shrink-0">
+        <div class="bg-slate-50 p-3 sm:p-4 border-t border-slate-200 flex flex-col sm:flex-row gap-3 sm:items-center justify-between shrink-0">
             <button onclick="openChatFromModal()" class="text-slate-700 hover:text-slate-900 text-xs font-semibold flex items-center space-x-1 px-3 py-2 border border-slate-300 rounded-lg bg-white">
                 <i class="fa-solid fa-comments text-brand-600"></i>
                 <span>Ask Owner A Question</span>
             </button>
-            <div class="flex space-x-2">
+            <div class="flex flex-wrap gap-2">
                 <button onclick="closeModal('modalBedspaceViewer')" class="px-4 py-2 border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-100">Close</button>
-                <button onclick="openPreHoldForm()" class="px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-brand-600/30 flex items-center space-x-1">
+                <button type="button" onclick="openAdvanceReservationForm()" class="px-3 py-2 border border-emerald-300 text-emerald-800 rounded-xl text-xs font-bold hover:bg-emerald-50"><i class="fa-solid fa-calendar-plus mr-1"></i>Reserve for later</button>
+                <button onclick="openPreHoldForm()" class="px-3 sm:px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-brand-600/30 flex items-center space-x-1">
                     <i class="fa-solid fa-calendar-check mr-1"></i>
                     <span>Fill Info & Hold 24h</span>
                 </button>
@@ -592,30 +679,31 @@
 
         <form onsubmit="submitHoldRequest(event)" class="p-6 space-y-4 text-xs">
             <div>
-                <label class="block font-bold text-slate-700 mb-1">Full Student Name *</label>
+                <label class="block font-bold text-slate-700 mb-1">Full Student Name <span class="required-mark">*</span></label>
                 <input type="text" id="holdStudentName" required placeholder="e.g. Juan De La Cruz" class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-brand-500 focus:outline-none">
             </div>
 
             <div class="grid grid-cols-2 gap-3">
                 <div>
-                    <label class="block font-bold text-slate-700 mb-1">Mobile Phone Number *</label>
+                    <label class="block font-bold text-slate-700 mb-1">Mobile Phone Number <span class="required-mark">*</span></label>
                     <input type="tel" id="holdStudentPhone" required placeholder="0917XXXXXXX" class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-brand-500 focus:outline-none">
                 </div>
                 <div>
-                    <label class="block font-bold text-slate-700 mb-1">Student Email *</label>
+                    <label class="block font-bold text-slate-700 mb-1">Student Email <span class="required-mark">*</span></label>
                     <input type="email" id="holdStudentEmail" required placeholder="juan@univ.edu.ph" class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-brand-500 focus:outline-none">
                 </div>
             </div>
 
             <div>
-                <label class="block font-bold text-slate-700 mb-1">Target Visitation Date *</label>
+                <label class="block font-bold text-slate-700 mb-1">Target Visitation Date <span class="required-mark">*</span></label>
                 <input type="date" id="holdVisitDate" required class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-brand-500 focus:outline-none">
             </div>
 
             <div>
-                <label for="holdVisitTime" class="block font-bold text-slate-700 mb-1">Preferred Visitation Time *</label>
-                <input type="text" id="holdVisitTime" required inputmode="numeric" maxlength="5" autocomplete="off" placeholder="HH:MM (e.g. 09:30)" pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" onblur="normalizeVisitTimeInput(this)" value="10:00" class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-brand-500 focus:outline-none">
-                <p class="mt-1 text-[11px] text-slate-500">Type a time (09:30, 9:30, or 0930). Visiting hours: 08:00–20:00.</p>
+                <label for="holdVisitTime" class="block font-bold text-slate-700 mb-1">Choose a visitation time <span class="required-mark">*</span></label>
+                <input type="hidden" id="holdVisitTime" value="10:00">
+                <p class="mt-1 text-xs text-slate-500">Select a one-hour visit window (8 AM–8 PM).</p>
+                <div id="hourVisitSlots" class="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2" role="group" aria-label="One-hour visitation windows"></div>
             </div>
 
             <div class="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-[11px] space-y-1">
@@ -706,27 +794,28 @@
         </div>
         <form id="tenantAssignmentForm" onsubmit="submitTenantAssignment(event)" class="p-5 space-y-4 text-xs">
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <label class="font-semibold sm:col-span-2">Property *
+                <label class="font-semibold sm:col-span-2">Property <span class="required-mark">*</span>
                     <select id="tenantListing" class="input-editor" required onchange="updateTenantRoomChoices()"></select>
                 </label>
-                <label class="font-semibold sm:col-span-2">Specific Room / Bedspace *
+                <label class="font-semibold sm:col-span-2">Specific Room / Bedspace <span class="required-mark">*</span>
                     <select id="tenantRoom" class="input-editor" required onchange="updateTenantRoomRate()"></select>
                 </label>
-                <label class="font-semibold sm:col-span-2">Individual Bed Slot *
+                <label class="font-semibold sm:col-span-2">Individual Bed Slot <span class="required-mark">*</span>
                     <select id="tenantBedSlot" class="input-editor" required></select>
                 </label>
-                <label class="font-semibold sm:col-span-2">Tenant Full Name *
+                <label class="font-semibold sm:col-span-2">Tenant Full Name <span class="required-mark">*</span>
                     <input id="tenantFullName" class="input-editor" required minlength="2" maxlength="150" autocomplete="name" placeholder="e.g., Ana Dela Cruz"></label>
-                <label class="font-semibold">Mobile Number *
+                <label class="font-semibold">Mobile Number <span class="required-mark">*</span>
                     <input id="tenantPhone" type="tel" class="input-editor" required minlength="7" maxlength="35" autocomplete="tel" placeholder="09xxxxxxxxx"></label>
                 <label class="font-semibold">Email (optional)
                     <input id="tenantEmail" type="email" class="input-editor" maxlength="250" autocomplete="email"></label>
-                <label class="font-semibold">Move-in Date *
+                <label class="font-semibold">Move-in Date <span class="required-mark">*</span>
                     <input id="tenantMoveIn" type="date" class="input-editor" required></label>
-                <label class="font-semibold">Monthly Due Day (1–31) *
+                <label class="font-semibold">Expected move-out (last occupied day) <span class="required-mark">*</span><input id="tenantPlannedEnd" type="date" required class="input-editor"><span class="block text-[11px] font-normal text-slate-500 mt-1">Estimated date only. Ending the tenancy remains a separate owner action.</span></label>
+                <label class="font-semibold">Monthly Due Day (1–31) <span class="required-mark">*</span>
                     <input id="tenantDueDay" type="number" min="1" max="31" step="1" class="input-editor price-no-spinner" required value="5">
                 </label>
-                <label class="font-semibold sm:col-span-2">Agreed Monthly Rent (₱) *
+                <label class="font-semibold sm:col-span-2">Agreed Monthly Rent (₱) <span class="required-mark">*</span>
                     <input id="tenantMonthlyRent" type="number" min="1" max="10000000" step="1" class="input-editor price-no-spinner" required>
                     <span class="block mt-1 text-slate-500 font-normal">Defaults to the advertised room price. Adjust to the amount agreed with this tenant.</span>
                 </label>
@@ -750,12 +839,12 @@
     </div>
     <form id="listingEditorForm" onsubmit="saveListing(event)" class="overflow-y-auto p-5 space-y-5 text-xs">
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <label class="sm:col-span-2 font-semibold">Property Title *<input id="listingTitle" required minlength="3" maxlength="160" class="input-editor" placeholder="Example: Green Dormitory Residence"></label>
-        <label class="font-semibold">Accommodation Type *
+        <label class="sm:col-span-2 font-semibold">Property Title <span class="required-mark">*</span><input id="listingTitle" required minlength="3" maxlength="160" class="input-editor" placeholder="Example: Green Dormitory Residence"></label>
+        <label class="font-semibold">Accommodation Type <span class="required-mark">*</span>
           <select id="listingType" class="input-editor" required><option>Dormitory</option><option>Bedspace</option><option>Apartment</option></select>
         </label>
-        <label class="font-semibold">Exact Location / Address *
-          <input id="listingLocation" type="text" required maxlength="300" class="input-editor" placeholder="Street, barangay, city, nearby campus"></label>
+        <label class="font-semibold">Exact Location / Address <span class="required-mark">*</span>
+          <input id="listingLocation" type="text" required maxlength="300" class="input-editor" oninput="queueListingAddressSuggestions(this.value)" autocomplete="off" aria-controls="listingAddressSuggestions" placeholder="Try Irisan, Baguio City"><div id="listingAddressSuggestions" class="location-suggestions hidden"></div><span class="text-[11px] text-slate-500">Suggestions from OpenStreetMap. Check and adjust the map pin.</span></label>
         <label class="font-semibold sm:col-span-2">Distance / Landmark<input id="listingDistance" class="input-editor" placeholder="150m from campus, next to library"></label>
         <div class="sm:col-span-2 space-y-2">
           <p class="font-semibold">Pin exact property location (recommended)</p>
@@ -766,8 +855,8 @@
             <button type="button" onclick="clearListingPin()" class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-300 text-xs font-semibold">Clear pin</button>
           </div>
         </div>
-        <label class="font-semibold">Owner / Contact Name *<input id="listingOwner" class="input-editor" required></label>
-        <label class="font-semibold">Contact Phone<input id="listingPhone" type="tel" class="input-editor"></label>
+        <label class="font-semibold">Owner / Contact Name <span class="required-mark">*</span><input id="listingOwner" class="input-editor" required></label>
+        <label class="font-semibold">Contact Phone <span class="required-mark">*</span><input id="listingPhone" type="tel" class="input-editor" required minlength="7" maxlength="35" autocomplete="tel" placeholder="09xxxxxxxxx"></label>
         <label class="sm:col-span-2 font-semibold">Additional Property Notes (optional)<textarea id="listingNote" class="input-editor" rows="2" maxlength="1000" placeholder="House rules, transport links, utility details, visiting instructions..."></textarea></label>
         <div class="sm:col-span-2"><label class="font-semibold">Property Main Photo</label>
           <div id="listingMainDrop" class="image-dropzone mt-2" ondragover="event.preventDefault()" ondrop="handleImageDrop(event, 'listingMainDrop')">
@@ -794,12 +883,87 @@
   </div>
 </div>
 
+<!-- Private tenant announcement reader, opened via a link given by the landlord -->
+<div id="tenantUpdatesView" class="hidden fixed inset-0 z-[90] overflow-auto bg-slate-50 p-4 sm:p-8">
+  <div class="max-w-xl mx-auto bg-white rounded-2xl border shadow-sm p-5 space-y-4">
+    <div class="flex items-center justify-between"><h1 class="font-bold text-xl"><i class="fa-solid fa-bullhorn text-emerald-600 mr-2"></i>Homebound Tenant Updates</h1><button onclick="closeTenantUpdates()" class="simple-icon-btn" aria-label="Close updates"><i class="fa-solid fa-xmark"></i></button></div>
+    <p class="text-sm text-slate-600">Announcements shared with you by your landlord. Keep this private link secure.</p><div id="tenantUpdatesList" class="space-y-3 text-sm"></div>
+    <button class="rounded-lg border px-3 py-2 text-xs font-semibold" onclick="loadTenantUpdates()">Refresh updates</button>
+  </div>
+</div>
+<!-- Owner review: rental terms are captured when a reservation is approved. -->
+<div id="modalReservationReview" class="hidden fixed inset-0 z-[96] flex items-center justify-center p-4 modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="reservationReviewTitle">
+ <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-3 max-h-[90vh] overflow-y-auto">
+  <div class="flex justify-between items-start gap-3"><div><h3 id="reservationReviewTitle" class="font-bold text-slate-900">Review reservation</h3><p id="reservationReviewSummary" class="text-xs text-slate-500 mt-1"></p></div><button type="button" onclick="closeModal('modalReservationReview')" aria-label="Close" class="simple-icon-btn"><i class="fa-solid fa-xmark"></i></button></div>
+  <form id="reservationReviewForm" onsubmit="submitReservationReview(event)" class="space-y-3">
+   <input id="reservationReviewId" type="hidden"><input id="reservationReviewAction" type="hidden">
+   <div id="reservationApprovalFields" class="space-y-3">
+    <p class="text-xs text-slate-600">Tenant contact and stay dates are already recorded. Set rent terms now; payment tracking starts at move-in.</p>
+    <label class="block text-xs font-semibold">Monthly rent (₱) <span class="required-mark">*</span><input type="number" id="reservationMonthlyRent" class="input-editor" min="1" max="10000000" step="0.01"></label>
+    <label class="block text-xs font-semibold">Monthly due day <span class="required-mark">*</span><input type="number" id="reservationDueDay" class="input-editor" min="1" max="31" value="1"></label>
+   </div>
+   <div id="reservationOfferFields" class="hidden space-y-3">
+    <p class="text-xs text-slate-600">Offer different dates. The student can accept or decline in chat.</p>
+    <div class="grid grid-cols-2 gap-2"><label class="text-xs font-semibold">New move-in <input id="reservationOfferStart" type="date" class="input-editor"></label><label class="text-xs font-semibold">Checkout <input id="reservationOfferEnd" type="date" class="input-editor"></label></div>
+    <label class="block text-xs font-semibold">Short note (optional)<textarea id="reservationOfferNote" class="input-editor" rows="2" maxlength="300" placeholder="e.g. Bed available one week later"></textarea></label>
+   </div>
+   <button type="submit" id="reservationReviewSubmit" class="bg-brand-600 text-white w-full rounded-xl py-2.5 text-sm font-semibold">Confirm</button>
+  </form>
+ </div>
+</div>
+<!-- Advance reservation is distinct from a 24-hour visitation hold -->
+<div id="modalAdvanceReservation" class="hidden fixed inset-0 z-[80] flex items-center justify-center p-4 modal-backdrop">
+  <div class="bg-white rounded-xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-xl">
+    <div class="bg-slate-900 text-white p-4 rounded-t-xl flex justify-between"><h3 class="font-bold">Request an advance reservation</h3><button onclick="closeModal('modalAdvanceReservation')" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></div>
+    <form id="advanceReservationForm" class="p-5 space-y-3 text-sm" onsubmit="submitAdvanceReservation(event)">
+      <p id="advanceReservationRoom" class="text-sm font-semibold"></p><p class="text-xs text-slate-500">Select your stay dates. The owner will review your request.</p>
+      <label class="block font-semibold">Select bed <span class="required-mark">*</span><select id="advanceBedSlot" required class="input-editor"></select></label>
+      <div class="hb-calendar-nav"><button type="button" onclick="hbCalChangeMonth(-1)" aria-label="Previous month"><i class="fa-solid fa-chevron-left"></i></button><strong id="hbStudentCalendarMonth"></strong><button type="button" onclick="hbCalChangeMonth(1)" aria-label="Next month"><i class="fa-solid fa-chevron-right"></i></button></div>
+      <div id="hbStudentCalendarGrid" class="hb-calendar-grid" aria-label="Choose your date range"></div>
+      <div class="hb-calendar-legend"><span><i class="hb-key hb-key-green"></i> Available</span><span><i class="hb-key hb-key-red"></i> Occupied</span><span><i class="hb-key hb-key-orange"></i> Reserved</span><span>⋯ Expected vacancy</span></div>
+      <p id="hbCalendarNote" class="text-xs text-slate-500" aria-live="polite"></p>
+      <p id="hbCalendarSelection" class="text-xs font-semibold" aria-live="polite">Select move-in and move-out date</p>
+      <div class="hb-calendar-date-summary" aria-live="polite">
+        <div><span>Move in</span><strong id="hbCalendarMoveInLabel">Not selected</strong></div>
+        <div><span>Move out</span><strong id="hbCalendarMoveOutLabel">Not selected</strong></div>
+      </div>
+      <input id="advanceMoveIn" type="hidden"><input id="advanceMoveOut" type="hidden">
+      <label class="block font-semibold">Full name <span class="required-mark">*</span><input id="advanceName" required maxlength="150" class="input-editor"></label>
+      <label class="block font-semibold">Email <span class="required-mark">*</span><input id="advanceEmail" type="email" required maxlength="250" class="input-editor"></label>
+      <label class="block font-semibold">Phone <span class="required-mark">*</span><input id="advancePhone" type="tel" required minlength="7" maxlength="35" class="input-editor"></label>
+      <div id="advanceReservationHint" class="text-xs text-slate-500"></div>
+      <button class="w-full bg-brand-600 text-white font-bold rounded-lg py-2.5" type="submit">Send reservation request</button>
+    </form>
+  </div>
+</div>
+<!-- Student confirmation: a submitted request is not yet an approved booking. -->
+<div id="hbReservationSentModal" class="hidden fixed inset-0 z-[95] flex items-center justify-center p-4 modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="hbReservationSentTitle">
+ <div class="bg-white w-full max-w-sm rounded-2xl shadow-xl p-6 text-center space-y-3">
+  <div class="mx-auto h-12 w-12 rounded-full bg-green-100 text-green-700 flex items-center justify-center"><i class="fa-solid fa-check text-xl" aria-hidden="true"></i></div>
+  <h3 id="hbReservationSentTitle" class="text-lg font-bold text-slate-900">Request submitted!</h3>
+  <p class="text-sm text-slate-600">Your reservation request is pending owner approval. Check Messages for updates.</p>
+  <button type="button" onclick="closeModal('hbReservationSentModal')" class="w-full bg-brand-600 text-white font-semibold py-2.5 rounded-xl">OK</button>
+ </div>
+</div>
+<!-- Owner: bed occupancy calendar; private details stay in tenancy records. -->
+<div id="hbCalendarOwnerModal" class="hidden fixed inset-0 z-[85] flex items-center justify-center p-4 modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="hbCalendarOwnerTitle">
+ <div class="bg-white w-full max-w-lg max-h-[90vh] overflow-auto rounded-2xl shadow-xl p-5 space-y-3">
+  <div class="flex justify-between gap-3 items-start"><div><h3 id="hbCalendarOwnerTitle" class="font-bold text-slate-900"></h3><p class="text-xs text-slate-500">Actual occupancy and approved future reservations</p></div><button type="button" class="simple-icon-btn" aria-label="Close occupancy calendar" onclick="closeModal('hbCalendarOwnerModal')"><i class="fa-solid fa-xmark"></i></button></div>
+  <label class="text-xs font-semibold">Bed <select id="hbCalendarOwnerBed" class="input-editor" onchange="hbCalSelectBed(this.value)"></select></label>
+  <div class="hb-calendar-nav"><button type="button" onclick="hbCalChangeMonth(-1)" aria-label="Previous month"><i class="fa-solid fa-chevron-left"></i></button><strong id="hbOwnerCalendarMonth"></strong><button type="button" onclick="hbCalChangeMonth(1)" aria-label="Next month"><i class="fa-solid fa-chevron-right"></i></button></div>
+  <div id="hbOwnerCalendarGrid" class="hb-calendar-grid" aria-label="Occupancy by date"></div>
+  <div class="hb-calendar-legend"><span><i class="hb-key hb-key-green"></i> Available</span><span><i class="hb-key hb-key-red"></i> Occupied</span><span><i class="hb-key hb-key-orange"></i> Reserved</span><span>⋯ Expected vacancy</span></div>
+  <p class="text-xs text-slate-500">Expected move-out dates are set when assigning a tenant. The landlord must confirm the actual move-out before the bed is released.</p>
+ </div>
+</div>
 <!-- Keep script order: SDK, settings, sample data, database service, application. -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/config.js"></script>
 <script src="js/demo-data.js"></script>
 <script src="js/supabase-service.js"></script>
 <script src="js/app.js"></script>
+<script src="js/homebound-extras.js"></script>
+<script src="js/homebound-calendar.js"></script>
 
 </body>
 </html>

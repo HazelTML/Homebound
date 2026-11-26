@@ -28,7 +28,6 @@ html { scroll-behavior: smooth; }
     #modalBedspaceViewer.chat-side-open .room-preview-dialog { max-width:min(900px,calc(100vw - 390px)); margin-right:8px; }
 }
 @media (max-width:640px) {
-    .homebound-hero { padding:1rem; }
     #liveChatDrawer { left:12px; right:12px; width:auto; bottom:8px; height:280px !important; }
     #modalBedspaceViewer.chat-side-open .room-preview-dialog { margin-top:0; transform:translateY(-70px); max-height:64vh; }
     #activeHoldBanner { max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -51,3 +50,404 @@ html { scroll-behavior: smooth; }
     #ownerPortalView { padding:0 !important; margin:0 !important; }
     canvas { print-color-adjust:exact; -webkit-print-color-adjust:exact; }
 }
+
+/* Nov 2026: lower visual density, consistent focus, readable dashboard. */
+:root { --hb-ink:#172b3c; --hb-green:#15803d; }
+body { color:var(--hb-ink); }
+button, input, select, textarea { font:inherit; }
+button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline:2px solid #15803d; outline-offset:2px;
+}
+.required-mark {color:#dc2626;font-weight:800;}
+#studentPortalView h1, #ownerPortalView h1 {line-height:1.2;}
+#ownerPortalView .text-xs, #modalListingEditor .text-xs, #tabContentPayments .text-xs {font-size:.81rem;line-height:1.45;}
+#ownerPortalView .text-\[10px\] {font-size:.75rem;line-height:1.35;}
+#ownerPortalView .admin-tab-btn {font-size:.82rem;gap:.35rem;min-height:46px;}
+#ownerPortalView table th {font-size:.77rem;letter-spacing:.02em;white-space:nowrap;}
+#ownerPortalView table td {font-size:.82rem;line-height:1.45;}
+#ownerPortalView .analytics-panel {padding:1rem 1.15rem;}
+#ownerPortalView #adminListingsContainer {display:grid;grid-template-columns:minmax(0,1fr);gap:.75rem;}
+#ownerPortalView #adminListingsContainer article {max-width:100%;}
+.payment-status-text {font-weight:750;font-size:.82rem;letter-spacing:.005em;}
+.simple-icon-btn {display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;min-width:36px;min-height:36px;padding:.5rem;border:1px solid #cbd5e1;border-radius:.6rem;background:white;color:#334155;cursor:pointer;transition:background-color .18s,border-color .18s;}
+.simple-icon-btn:hover {background:#f0fdf4;border-color:#16a34a;color:#166534;}
+.simple-icon-btn:disabled {opacity:.45;cursor:not-allowed;}
+.rent-filters {box-shadow:0 1px 3px rgba(21,128,61,.06);}
+.rent-filters select {background:white;min-height:34px;font-size:.84rem;}
+.hour-slot {border:1px solid #cbd5e1;border-radius:.7rem;padding:.6rem .35rem;background:white;color:#334155;font-size:.78rem;font-weight:650;text-align:center;line-height:1.35;}
+.hour-slot:hover {background:#f0fdf4;border-color:#16a34a;}
+.hour-slot.selected,.hour-slot[aria-pressed="true"] {color:#166534;border-color:#15803d;background:#dcfce7;box-shadow:inset 0 0 0 1px #15803d;}
+.location-suggestions {margin-top:.35rem;max-height:190px;overflow-y:auto; background:#fff;border:1px solid #cbd5e1;border-radius:.7rem;box-shadow:0 8px 24px rgba(15,23,42,.09);position:relative;z-index:10;}
+.location-option {display:block;text-align:left;font-size:.81rem;width:100%;padding:.65rem .85rem;color:#334155;background:#fff;border-bottom:1px solid #f1f5f9;}
+.location-option:hover,.location-option:focus-visible {background:#f0fdf4;}
+.location-option:last-child {border-bottom:0;}
+#ownerConversationList button {border-radius:1rem;font-size:.87rem;}
+#ownerChatMessages>div>div,#liveChatMessages>div>div {font-size:.85rem;line-height:1.5;padding:.7rem .9rem;}
+#studentInboxPanel {z-index:65;}
+#liveChatDrawer {z-index:60!important;}
+#aiAssistantWindow {z-index:60!important;}
+#studentPortalView .text-xs {line-height:1.45;}
+#tabContentAnnouncements textarea {resize:vertical;}
+@media (max-width:959px) {
+  /* On narrow screens the opening action closes the other drawer. */
+  #liveChatDrawer,#aiAssistantWindow {width:min(390px,calc(100vw - 24px));right:12px;left:auto;bottom:84px;height:min(470px,68vh)!important;}
+  #modalBedspaceViewer.chat-side-open {padding:8px;}
+  #modalBedspaceViewer.chat-side-open .room-preview-dialog {width:100%;max-height:72vh;transform:translateY(-10vh);margin:0;}
+}
+@media (max-width:600px) {
+  #studentInboxFloating {bottom:5.75rem;right:.75rem;}
+  #aiAssistantWindow,#liveChatDrawer {bottom:84px;right:12px;left:12px;width:auto;height: min(470px,65vh)!important;}
+  #tabContentPayments,#tabContentAnalytics,#tabContentAnnouncements,#tabContentVisitations {padding:1rem;}
+  #ownerPortalView .admin-tab-btn {padding:.65rem .8rem;}
+  #modalBedspaceViewer.chat-side-open .room-preview-dialog {max-height:63vh;transform:translateY(-12vh);}
+}
+@media print {
+  [data-analytics-view],[data-analytics-view].hidden {display:block!important;visibility:visible!important;break-inside:auto;}
+  .analytics-view>div {break-inside:avoid;}
+  #analyticsSource,#analyticsPeriod,#forecastNote {color:#111!important;}
+  .analytics-panel canvas {height:150px!important;max-height:150px!important;}
+  #ownerPortalView #tabContentAnalytics {display:block!important;}
+  #tabContentAnalytics [data-analytics-view] {margin-top:8mm;}
+}
+
+/* Homebound November 26 refinements: photo-led welcome and intentionally compact management. */
+#map {background:#e7f0ee;min-height:340px;}
+.map-status {position:absolute;z-index:850;left:14px;bottom:14px;max-width:calc(100% - 28px);background:rgba(255,255,255,.98);border:1px solid #cbd5e1;border-radius:.65rem;padding:.65rem .8rem;color:#334155;font-size:.81rem;box-shadow:0 4px 16px rgba(0,0,0,.09);}
+#mapStatus.hidden {display:none;}
+.room-owner-contact {min-width:0;max-width:45%;display:flex;flex-direction:column;align-items:flex-end;text-align:right;gap:2px;font-size:.75rem;line-height:1.35;padding:0 12px;overflow-wrap:anywhere;}
+.room-owner-contact a {overflow-wrap:anywhere;}
+#modalBedspaceViewer .room-preview-dialog > div:first-child {gap:10px;}
+#adminListingsContainer {display:flex!important;flex-direction:column;align-items:stretch;overflow-x:hidden;}
+#adminListingsContainer article {width:100%!important;max-width:none!important;min-width:0;}
+#adminListingsContainer .owner-listing-expansion {display:block;min-width:0;max-width:100%;overflow-wrap:anywhere;}
+#adminListingsContainer .owner-listing-expansion.hidden {display:none;}
+#adminListingsContainer .owner-listing-expansion button {max-width:100%;white-space:normal;overflow-wrap:anywhere;}
+#tabContentPayments .payment-status-text {color:#334155!important;background:none!important;font-weight:600;}
+#tabContentPayments #rentTrackerSummary {display:none!important;}
+#tabContentPayments table {min-width:760px;}
+#tabContentAnalytics .analytics-kpis > div {border:1px solid #e2e8f0;border-radius:12px;background:#fff;padding:14px;}
+#tabContentAnalytics .analytics-kpis > div:nth-child(3n+1) {border-left:3px solid #15803d;}
+#tabContentAnalytics .analytics-kpis > div:nth-child(3n+2) {border-left:3px solid #0f766e;}
+#tabContentAnalytics .analytics-kpis > div:nth-child(3n) {border-left:3px solid #64748b;}
+#tabContentAnalytics .analytics-kpis .text-2xl {font-size:1.45rem;line-height:1.3;margin-top:.35rem;}
+#studentAnnouncementSection {transition:box-shadow .18s ease;}
+#studentAnnouncementSection:focus-within {box-shadow:0 3px 14px rgba(22,101,52,.08);}
+#studentInboxFloating {z-index:62;}
+#studentInboxPanel {z-index:64;}
+#studentInboxFloating button {touch-action:manipulation;}
+#campusDistanceDetails summary {list-style-position:inside;}
+#campusDistanceDetails[open] {box-shadow:0 1px 8px rgba(15,23,42,.05);}
+@media (max-width:720px) {
+  .room-owner-contact {max-width:48%;font-size:.7rem;padding:0 3px;}
+  #modalBedspaceViewer .room-preview-dialog > div:first-child {padding:.8rem;}
+  #studentInboxFloating {right:12px!important;bottom:96px!important;}
+  #studentInboxPanel {width:min(330px,calc(100vw - 24px));}
+}
+@media print {
+  .homebound-hero,#studentAnnouncementSection,.map-status {display:none!important;}
+  #tabContentAnalytics .analytics-kpis > div {break-inside:avoid;}
+  #forecastMonthlyRows tr {break-inside:avoid;}
+}
+
+
+/* Homepage redesign: centered editorial welcome over the selected Unsplash photograph.
+   All location filtering, budget filtering and reset callbacks remain unchanged. */
+.homebound-hero {
+  position:relative;
+  isolation:isolate;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  min-height:310px;
+  padding:clamp(1.15rem,2.5vw,1.65rem) clamp(1.1rem,3vw,2rem);
+  border-radius:1.4rem;
+  background-color:#163b2f;
+  /* The photo and overlay live on a separate layer so text stays crisp. */
+  box-shadow:0 18px 44px rgba(15,40,28,.16);
+  overflow:visible;
+  color:#fff;
+}
+/* Source: https://unsplash.com/photos/low-angle-view-high-rise-buildings-nxZDMUQhN4o
+   Photo by Abbe Sublett, served through Unsplash's image CDN. */
+.homebound-hero::before {
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:0;
+  border-radius:inherit;
+  background-image:
+    linear-gradient(100deg,rgba(6,29,23,.70) 0%,rgba(7,39,31,.59) 48%,rgba(7,29,24,.70) 100%),
+    url('https://images.unsplash.com/photo-1560179707-f14e90ef3623?auto=format&fit=crop&w=1800&q=85');
+  background-color:#163b2f;
+  background-position:center 48%;
+  background-size:cover;
+  background-repeat:no-repeat;
+  filter:blur(3px);
+  pointer-events:none;
+}
+.homebound-hero-content {
+  width:100%;
+  max-width:960px;
+  margin:0 auto;
+  position:relative;
+  z-index:2;
+  text-align:center;
+}
+.homebound-hero-eyebrow {
+  margin:0 0 .45rem;
+  font-size:.69rem;
+  font-weight:800;
+  line-height:1.4;
+  letter-spacing:.19em;
+  color:#d1fae5;
+}
+.homebound-hero h1 {
+  margin:0 auto;
+  max-width:800px;
+  font-size:clamp(2rem,3.7vw,3.1rem);
+  line-height:1.06!important;
+  letter-spacing:-.045em;
+  font-weight:800;
+  text-wrap:balance;
+  text-shadow:0 3px 20px rgba(0,0,0,.24);
+}
+.homebound-hero-intro {
+  max-width:545px;
+  margin:.6rem auto 1rem;
+  color:#ecfdf5;
+  font-size:clamp(.86rem,1.12vw,.96rem);
+  line-height:1.6;
+  text-wrap:pretty;
+  text-shadow:0 1px 7px rgba(0,0,0,.35);
+}
+.hero-search {
+  display:grid;
+  grid-template-columns:minmax(0,1.75fr) minmax(165px,.85fr) auto;
+  align-items:end;
+  gap:.75rem;
+  max-width:895px;
+  margin:0 auto;
+  padding:.7rem .8rem;
+  border:1px solid rgba(255,255,255,.65);
+  border-radius:1.1rem;
+  background:rgba(255,255,255,.96);
+  box-shadow:0 15px 34px rgba(2,24,16,.22);
+  text-align:left;
+  position:relative;
+  z-index:3;
+}
+.hero-search-field {position:relative; min-width:0;}
+.homebound-hero .hero-search-field > label {
+  display:block;
+  margin-bottom:.42rem;
+  font-size:.79rem;
+  line-height:1.3;
+  font-weight:700;
+  color:#374151;
+  text-shadow:none;
+}
+.hero-input-wrap {position:relative;}
+.hero-input-wrap > i {
+  position:absolute;
+  left:.86rem;
+  top:50%;
+  transform:translateY(-50%);
+  color:#15803d;
+  pointer-events:none;
+  font-size:.88rem;
+}
+.homebound-hero .hero-search-input,
+.homebound-hero .hero-budget-select {
+  display:block;
+  width:100%;
+  min-height:40px;
+  padding:.5rem .82rem;
+  border:1px solid #d9e2df;
+  border-radius:.7rem;
+  background:#fff;
+  color:#172b3c;
+  font-size:.86rem;
+  line-height:1.3;
+  outline-offset:2px;
+}
+.homebound-hero .hero-search-input {padding-left:2.35rem;}
+.homebound-hero .hero-search-input::placeholder {color:#82908a;opacity:1;}
+.homebound-hero .hero-search-input:focus,
+.homebound-hero .hero-budget-select:focus {border-color:#15803d;box-shadow:0 0 0 2px rgba(21,128,61,.13);}
+.hero-search-actions {display:flex;align-items:center;gap:.48rem;}
+.hero-reset-button,
+.hero-browse-button {
+  display:inline-flex;
+  gap:.44rem;
+  justify-content:center;
+  align-items:center;
+  min-height:40px;
+  padding:.5rem .9rem;
+  border-radius:.7rem;
+  font-size:.83rem;
+  font-weight:750;
+  white-space:nowrap;
+  text-decoration:none;
+  transition:background-color .18s ease,transform .18s ease;
+}
+.hero-reset-button {border:1px solid #d9e2df;background:#f6f8f7;color:#455451;}
+.hero-reset-button:hover {background:#edf2ee;}
+.hero-browse-button {border:1px solid #15803d;background:#15803d;color:#fff;}
+.hero-browse-button:hover {background:#166534;transform:translateY(-1px);color:#fff;}
+.homebound-hero .location-suggestions {
+  position:absolute;
+  top:100%;
+  left:0;
+  right:0;
+  z-index:150;
+  color:#243647;
+  text-align:left;
+  box-shadow:0 12px 26px rgba(0,0,0,.16);
+}
+.hero-search-radius {display:block;margin:.45rem .2rem 0;font-size:.72rem;color:#475569;}
+.hero-search-radius.hidden {display:none;}
+#listingsHeading {scroll-margin-top:90px;}
+@media (max-width:920px) {
+  .hero-search {grid-template-columns:minmax(0,1.4fr) minmax(160px,.8fr);}
+  .hero-search-actions {grid-column:1 / -1;justify-content:flex-end;}
+}
+@media (max-width:640px) {
+  .homebound-hero {
+    min-height:0;
+    padding:1.5rem 1rem 1.1rem;
+    background-position:65% center;
+  }
+  .homebound-hero::before {background-position:65% center;}
+  .homebound-hero h1 {font-size:clamp(1.9rem,7.7vw,2.45rem);}
+  .homebound-hero-eyebrow {font-size:.65rem;}
+  .homebound-hero-intro {margin:.55rem auto .95rem;font-size:.86rem;}
+  .hero-search {grid-template-columns:minmax(0,1fr);padding:.75rem;gap:.58rem;}
+  .hero-search-actions {grid-column:auto;justify-content:stretch;}
+  .hero-reset-button {flex:0 0 auto;}
+  .hero-browse-button {flex:1;}
+  .homebound-hero .hero-search-input,
+  .homebound-hero .hero-budget-select {font-size:.88rem;}
+}
+
+/* Student map and public community notices: balanced desktop columns, stacked mobile. */
+.hb-discovery-row {display:grid;grid-template-columns:minmax(0,1.6fr) minmax(300px,1fr);gap:1rem;align-items:stretch;}
+.hb-discovery-row > * {min-width:0;height:100%;}
+.hb-map-card,.hb-updates-card {display:flex;flex-direction:column;min-height:400px;}
+.hb-map-canvas {position:relative;flex:1;min-height:330px;}
+.hb-map-canvas #map {height:100%;min-height:330px;border-radius:.75rem;}
+.hb-public-feed {flex:1;min-height:0;overflow-y:auto;max-height:335px;padding-right:2px;}
+.hb-updates-refresh {height:34px;width:34px;flex-shrink:0;border:1px solid #e2e8f0;border-radius:.65rem;color:#15803d;background:#fff;}
+.hb-updates-refresh:hover {background:#f0fdf4;}
+.hb-notice {background:#f8fafc;border:1px solid #e2e8f0;border-radius:.75rem;padding:.8rem;overflow-wrap:anywhere;}
+.hb-advance-chat-card {max-width:88%;margin:.6rem auto;padding:.75rem 1rem;border:1px solid #bbf7d0;border-radius:.8rem;background:#f0fdf4;text-align:left;}
+@media(max-width:850px) {
+  .hb-discovery-row {grid-template-columns:minmax(0,1fr);}
+  .hb-map-card {min-height:350px;}
+  .hb-map-canvas,.hb-map-canvas #map {min-height:285px;}
+  .hb-updates-card {min-height:210px;max-height:360px;}
+  .hb-public-feed {max-height:240px;}
+}
+
+/* Compact accessible quick-access dock: announcements, messages, AI. */
+.hb-discovery-row {display:block!important;}
+.hb-discovery-row .hb-map-card {width:100%;height:auto;min-height:0;}
+.hb-discovery-row .hb-map-canvas {min-height:350px;}
+.hb-discovery-row .hb-map-canvas #map {min-height:350px;height:350px;}
+.hb-floating-tools {position:fixed;bottom:18px;right:18px;z-index:70;display:flex;flex-direction:column;align-items:center;gap:10px;pointer-events:none;}
+.hb-tool-item {position:relative;pointer-events:auto;}
+.hb-tool-item.hidden {display:none!important;}
+.hb-floating-button {width:52px;height:52px;display:flex;align-items:center;justify-content:center;position:relative;border-radius:999px;border:1px solid #d9dee5;background:#fff;color:#1e293b;font-size:21px;box-shadow:0 5px 18px rgba(15,23,42,.20);transition:transform .15s,background .15s,color .15s;cursor:pointer;}
+.hb-floating-button:hover,.hb-floating-button[aria-expanded="true"] {background:#ecfdf5;color:#166534;transform:translateY(-1px);}
+.hb-floating-button:focus-visible {outline:3px solid #22c55e;outline-offset:3px;}
+.hb-tool-unread {position:absolute;right:-5px;top:-5px;min-width:21px;height:21px;padding:0 4px;border-radius:100px;background:#dc2626;color:white;align-items:center;justify-content:center;font:700 11px/1 sans-serif;display:flex;}
+.hb-tool-unread.hidden {display:none!important;}
+#studentAnnouncementSection.hb-dock-panel,#studentInboxPanel,#aiAssistantWindow {position:fixed!important;right:83px!important;left:auto!important;bottom:18px!important;width:min(375px,calc(100vw - 112px))!important;max-width:calc(100vw - 112px)!important;max-height:min(520px,75vh)!important;z-index:71!important;box-shadow:0 14px 42px rgba(15,23,42,.22);}
+#studentAnnouncementSection.hb-dock-panel {height:auto!important;min-height:0!important;display:flex;flex-direction:column;max-height:min(480px,75vh)!important;overflow:hidden;}
+#studentAnnouncementSection.hb-dock-panel.hidden {display:none!important;}
+#studentAnnouncementSection .hb-public-feed {overflow-y:auto;min-height:0;max-height:min(370px,60vh);}
+#studentInboxPanel {overflow-y:auto;max-height:min(440px,70vh)!important;}
+#aiAssistantWindow {height:min(480px,75vh)!important;}
+#liveChatDrawer {z-index:72!important;}
+@media(max-width:600px){
+ .hb-floating-tools {right:11px;bottom:12px;gap:8px;}
+ .hb-floating-button {width:46px;height:46px;font-size:19px;}
+ #studentAnnouncementSection.hb-dock-panel,#studentInboxPanel,#aiAssistantWindow {right:66px!important;bottom:12px!important;width:calc(100vw - 78px)!important;max-width:calc(100vw - 78px)!important;max-height:65vh!important;}
+ #aiAssistantWindow {height:min(420px,65vh)!important;}
+ .hb-discovery-row .hb-map-canvas,.hb-discovery-row .hb-map-canvas #map {min-height:300px;height:300px;}
+}
+
+#studentInboxFloating {right:auto!important;bottom:auto!important;}
+
+/* Student conversation: anchor the selected chat next to the right-side tools.
+   The inbox closes when a conversation is selected (existing JS behavior).
+   Keep the chat in the same dock position as Announcements and AI. */
+#liveChatDrawer {
+  position: fixed !important;
+  left: auto !important;
+  right: 83px !important;
+  bottom: 18px !important;
+  width: min(375px, calc(100vw - 112px)) !important;
+  max-width: calc(100vw - 112px) !important;
+  height: min(430px, calc(100dvh - 36px)) !important;
+  max-height: calc(100dvh - 36px) !important;
+  z-index: 72 !important;
+}
+
+/* A student may inspect a room and message its owner simultaneously.
+   Leave the space on the RIGHT for the docked conversation. */
+@media (min-width: 900px) {
+  #modalBedspaceViewer.chat-side-open {
+    justify-content: flex-start !important;
+    padding-left: 12px !important;
+    padding-right: min(410px, 38vw) !important;
+  }
+  #modalBedspaceViewer.chat-side-open .room-preview-dialog {
+    max-width: min(900px, calc(100vw - 455px)) !important;
+    margin-left: 8px !important;
+    margin-right: 0 !important;
+  }
+}
+
+@media (max-width: 600px) {
+  #liveChatDrawer {
+    left: auto !important;
+    right: 66px !important;
+    bottom: 12px !important;
+    width: calc(100vw - 78px) !important;
+    max-width: calc(100vw - 78px) !important;
+    height: min(420px, 65dvh) !important;
+    max-height: 65dvh !important;
+  }
+}
+
+/* Homebound occupancy calendar: compact, readable date cells. */
+.hb-calendar-nav{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.hb-calendar-nav button{height:34px;width:34px;border:1px solid #cbd5e1;border-radius:9px;background:white}
+.hb-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.hb-calendar-weekday{text-align:center;color:#64748b;font-weight:700;font-size:11px;padding:6px 0}
+.hb-calendar-empty{min-height:34px}
+.hb-calendar-day{min-height:36px;border-radius:7px;font-size:12px;font-weight:700;border:1px solid transparent}
+.hb-day-available{background:#d1fae5;color:#065f46}
+.hb-day-expected{background:#d1fae5;color:#065f46;border:2px dashed #059669}
+.hb-day-occupied,.hb-day-blocked{background:#fee2e2;color:#991b1b}
+.hb-day-reserved{background:#fed7aa;color:#9a3412}
+.hb-calendar-day:disabled{cursor:not-allowed;opacity:.85}
+.hb-calendar-day:not(:disabled):hover{outline:2px solid #15803d;outline-offset:1px}
+.hb-day-selected{outline:2px solid #047857;outline-offset:-2px;background:#6ee7b7}
+.hb-calendar-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:#475569}
+.hb-calendar-legend span{display:inline-flex;align-items:center;gap:5px}
+.hb-key{display:inline-block;width:10px;height:10px;border-radius:3px}
+.hb-key-green{background:#d1fae5;border:1px solid #059669}
+.hb-key-red{background:#fee2e2;border:1px solid #dc2626}
+.hb-key-orange{background:#fed7aa;border:1px solid #f97316}
+.hb-calendar-loading{grid-column:span 7;text-align:center;padding:25px;color:#64748b;font-size:12px}
+@media(max-width:420px){.hb-calendar-grid{gap:2px}.hb-calendar-day{min-height:33px;font-size:11px}}
+
+/* Calendar selection: distinguish the selected move-in / move-out from availability. */
+.hb-calendar-date-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.hb-calendar-date-summary>div{display:flex;flex-direction:column;gap:4px;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;min-width:0}
+.hb-calendar-date-summary span{font-size:11px;color:#64748b;font-weight:600}
+.hb-calendar-date-summary strong{font-size:13px;color:#0f172a;overflow-wrap:anywhere}
+.hb-calendar-day.hb-day-selected{background:#a7f3d0;color:#064e3b;border:1px solid #059669;outline:none}
+.hb-calendar-day.hb-day-start,.hb-calendar-day.hb-day-end{background:#047857;color:#fff;border:2px solid #064e3b;box-shadow:0 0 0 2px #a7f3d0;outline:none;opacity:1}
+.hb-calendar-day.hb-day-start::after,.hb-calendar-day.hb-day-end::after{content:'•';font-size:9px;display:block;line-height:5px}

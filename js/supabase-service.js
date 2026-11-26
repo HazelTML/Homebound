@@ -37,7 +37,8 @@ const HomeboundStore = (() => {
                 name: String(r.name || ''), price: Number(r.price || 0),
                 capacity: String(r.capacity || ''), status: String(r.status || 'Available'),
                 totalCapacity: Number(r.totalCapacity) || null,
-                beds: Array.isArray(r.beds) ? r.beds.map(b => ({ id: String(b.id), status: String(b.status) })) : [],
+                beds: Array.isArray(r.beds) ? r.beds.map(b => ({ id: String(b.id), status: String(b.status), ...(b.availableFrom ? { availableFrom:String(b.availableFrom) } : {}),
+                    ...(b.reservedFor ? { reservedFor:String(b.reservedFor) } : {}) })) : [],
                 images: Array.isArray(r.images) ? r.images : [],
                 amenities: Array.isArray(r.amenities) ? r.amenities : [], note: String(r.note || '')
             }))
@@ -164,9 +165,19 @@ const HomeboundStore = (() => {
             p_conversation_id: payload.conversationId || null
         });
     }
+    const bookedVisitSlots = (listingId, visitDate) => callRpc('homebound_booked_visit_slots', { p_listing_id: listingId, p_visit_date: visitDate });
+    const completeVisit = (id) => callRpc('homebound_complete_visit', { p_id: id });
     const getHold = (id, token) => callRpc('homebound_get_hold', { p_id: id, p_token: token });
     const cancelHold = (id, token) => callRpc('homebound_cancel_hold', { p_id: id, p_token: token });
-    const setHoldStatus = (id, status) => callRpc('homebound_owner_set_hold_status', { p_id: id, p_status: status });
+    async function setHoldStatus(id, status) {
+        try {
+            return await callRpc('homebound_owner_set_hold_status', { p_id: id, p_status: status });
+        } catch (err) {
+            if (err?.code === '23505')
+                throw new Error('Another student already has a confirmed visit at that hour. Decline or reschedule this request.');
+            throw err;
+        }
+    }
     async function listHolds() {
         const { data, error } = await getClient().from('hold_requests').select('*').order('created_at', { ascending: false });
         if (error) throw error;
@@ -206,13 +217,14 @@ const HomeboundStore = (() => {
         return data || [];
     }
     async function assignTenant(payload) {
-        return callRpc('homebound_assign_bed', {
+        return callRpc('homebound_assign_bed_with_moveout', {
             p_listing_id: payload.listingId, p_room_name: payload.roomName,
             p_bed_slot: payload.bedSlot,
             p_tenant_name: payload.tenantName, p_phone: payload.phone,
             p_email: payload.email || '', p_start_date: payload.startDate,
             p_due_day: payload.dueDay, p_monthly_rent: payload.monthlyRent,
-            p_hold_id: payload.holdId || null
+            p_hold_id: payload.holdId || null,
+            p_planned_end_date: payload.plannedEndDate
         });
     }
     const setBedAvailable = (listingId, roomName, bedSlot, available) => callRpc('homebound_set_bed_available', {
@@ -229,6 +241,53 @@ const HomeboundStore = (() => {
     const setRentPaid = (id, paid) => callRpc('homebound_mark_payment', {
         p_payment_id: id, p_paid: paid
     });
+    // Separate advance reservations (future move-in) from 24-hour visitation holds.
+    async function createAdvanceReservation(payload) {
+        return callRpc('homebound_request_reservation_chat', {
+            p_listing_id:payload.listingId, p_room_name:payload.roomName,
+            p_bed_slot:payload.bedSlot, p_start:payload.moveIn, p_end:payload.moveOut,
+            p_student_name:payload.studentName, p_student_phone:payload.phone,
+            p_student_email:payload.email, p_token:payload.token,
+            p_chat_token:payload.chatToken, p_conversation_id:payload.conversationId || null
+        });
+    }
+    const calendarDates=(listingId,roomName,bedSlot,month)=>callRpc('homebound_calendar_dates',{
+        p_listing_id:listingId,p_room_name:roomName,p_bed_slot:bedSlot,p_month:`${month}-01`
+    });
+    const calendarCheck=(listingId,roomName,bedSlot,start,end)=>callRpc('homebound_calendar_check',{
+        p_listing_id:listingId,p_room_name:roomName,p_bed_slot:bedSlot,p_start:start,p_end:end
+    });
+    const getAdvanceStatus=(id,token)=>callRpc('homebound_advance_status',{p_id:id,p_token:token});
+    async function listAdvanceReservations() {
+        const {data,error}=await getClient().from('advance_reservations').select('*').order('created_at',{ascending:false}).limit(200);
+        if(error) throw error;
+        return data||[];
+    }
+    const reviewReservation=(payload)=>callRpc('homebound_review_reservation',{
+        p_id:payload.id,p_action:payload.action,p_monthly_rent:payload.monthlyRent??null,
+        p_due_day:payload.dueDay??null,p_offer_start:payload.offerStart||null,
+        p_offer_end:payload.offerEnd||null,p_message:payload.note||null
+    });
+    const respondReservationOffer=(id,token,accept)=>callRpc('homebound_respond_reservation_offer',{
+        p_id:id,p_token:token,p_accept:Boolean(accept)
+    });
+    const activateDueReservations=()=>callRpc('homebound_activate_due_reservations',{});
+    const finalizeReservationRent=(id,monthlyRent,dueDay)=>callRpc('homebound_finalize_reservation_rent',{
+        p_id:id,p_monthly_rent:monthlyRent,p_due_day:dueDay
+    });
+    const setAdvanceStatus=(id,status)=>reviewReservation({id,action:status});
+    const setPlannedEndDate=(id,date)=>callRpc('homebound_set_expected_moveout',{p_tenancy_id:id,p_date:date||null});
+    async function listAnnouncements() {
+        const {data,error}=await getClient().from('tenant_announcements').select('id,title,body,listing_id,created_at')
+            .order('created_at',{ascending:false}).limit(80);
+        if(error) throw error;
+        return data||[];
+    }
+    const publishAnnouncement=(listingId,title,body,isPublic=false)=>callRpc('homebound_publish_announcement_v2',{
+        p_listing_id:listingId,p_title:title,p_body:body,p_is_public:Boolean(isPublic)
+    });
+    const publicAnnouncements=()=>callRpc('homebound_public_announcements',{});
+    const tenantAnnouncements=(token)=>callRpc('homebound_tenant_announcements',{p_token:token});
     function subscribe(onChange) {
         if (!configured || liveChannel) return;
         liveChannel = getClient().channel('homebound-changes')
@@ -237,6 +296,8 @@ const HomeboundStore = (() => {
             .on('postgres_changes', {event:'*',schema:'public',table:'hold_requests'}, () => onChange('holds'))
             .on('postgres_changes', {event:'*',schema:'public',table:'tenancies'}, () => onChange('tenancies'))
             .on('postgres_changes', {event:'*',schema:'public',table:'rent_payments'}, () => onChange('payments'))
+            .on('postgres_changes', {event:'*',schema:'public',table:'tenant_announcements'}, () => onChange('announcements'))
+            .on('postgres_changes', {event:'*',schema:'public',table:'advance_reservations'}, () => onChange('advance_reservations'))
             .subscribe();
     }
     function unsubscribe() {
@@ -245,8 +306,10 @@ const HomeboundStore = (() => {
         liveChannel = null;
     }
     return { configured, getClient, list, currentOwner, login, logout, create, update, remove,
-        uploadImage, createHold, getHold, cancelHold, setHoldStatus, listHolds,
+        uploadImage, createHold, getHold, cancelHold, setHoldStatus, completeVisit, bookedVisitSlots, listHolds,
         studentSend, studentMessages, listConversations, ownerMessages, ownerReply,
         listTenancies, assignTenant, setBedAvailable, endTenancy, syncRentPayments, listRentPayments, setRentPaid,
+        createAdvanceReservation,getAdvanceStatus,listAdvanceReservations,setAdvanceStatus,reviewReservation,respondReservationOffer,activateDueReservations,finalizeReservationRent,setPlannedEndDate,calendarDates,calendarCheck,
+        listAnnouncements,publishAnnouncement,tenantAnnouncements,publicAnnouncements,
         subscribe, unsubscribe };
 })();
