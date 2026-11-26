@@ -437,6 +437,7 @@ function switchPortal(targetPortal) {
         document.getElementById('btnPortalStudent').className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:text-slate-900 transition flex items-center space-x-1.5';
         document.getElementById('btnPortalOwner').className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-white shadow-sm transition flex items-center space-x-1.5';
         currentPortal = 'owner';
+        switchAdminTab('overview');
         closeHomeboundToolPanels();
         document.getElementById('studentToolAnnouncement')?.classList.add('hidden');
         closeLiveChat();
@@ -1459,14 +1460,20 @@ async function loadOwnerRentData() {
 
 
 function switchAdminTab(tabName) {
-    for (const name of ['Visitations','Reservations','Payments','Listings','Chats','Analytics','Announcements']) {
-        document.getElementById(`tabContent${name}`).classList.add('hidden');
-        const btn = document.getElementById(`tabBtn${name}`);
-        btn.className = 'admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap';
-    }
+    const names = ['Overview','Visitations','Reservations','Payments','Listings','Chats','Analytics','Announcements'];
     const title = tabName.charAt(0).toUpperCase() + tabName.slice(1);
-    document.getElementById(`tabContent${title}`).classList.remove('hidden');
-    document.getElementById(`tabBtn${title}`).className = 'admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-brand-600 text-brand-600 flex items-center space-x-2 whitespace-nowrap';
+    if (!names.includes(title)) return;
+    for (const name of names) {
+        document.getElementById(`tabContent${name}`)?.classList.add('hidden');
+        const btn = document.getElementById(`tabBtn${name}`);
+        if (btn) {
+            btn.classList.toggle('hb-owner-active', name === title);
+            btn.setAttribute('aria-current', name === title ? 'page' : 'false');
+        }
+    }
+    document.getElementById(`tabContent${title}`)?.classList.remove('hidden');
+    document.getElementById('hbOwnerWorkspaceContent')?.classList.toggle('hidden', tabName === 'overview');
+    if (tabName === 'overview') renderOwnerOverviewDetails();
     if (tabName === 'listings') renderAdminListings();
     if (tabName === 'chats') loadOwnerInbox();
     if (tabName === 'visitations') loadOwnerHolds();
@@ -1475,11 +1482,11 @@ function switchAdminTab(tabName) {
     }
     if (tabName === 'analytics') requestAnimationFrame(() => {
         renderAnalytics();renderHomeboundForecast();
-        setAnalyticsView(document.getElementById('analyticsViewFilter').value);
+        setAnalyticsView('all');
         if(!window.Chart) loadHomeboundChartLibrary().then(loaded=>{
             const notice=document.getElementById('analyticsChartNotice');
             if(notice){notice.classList.toggle('hidden',loaded);}
-            if(loaded){renderAnalytics();renderHomeboundForecast();setAnalyticsView(document.getElementById('analyticsViewFilter').value);}
+            if(loaded){renderAnalytics();renderHomeboundForecast();setAnalyticsView('all');}
         });
     });
     if (tabName === 'announcements') loadTenantAnnouncements();
@@ -2004,16 +2011,22 @@ async function deleteListing(id) {
 
 function initAnalyticsCharts() { renderAnalytics(); }
 
+function refreshOwnerAnalyticsPeriod() {
+    renderAnalytics();
+    if (typeof renderHomeboundForecast === 'function') renderHomeboundForecast();
+    requestAnimationFrame(() => {
+        reportCharts.forEach(chart => { try {chart.resize();} catch (_) {} });
+        try { hbForecastChart?.resize(); } catch (_) {}
+    });
+}
+
 function printAnalyticsReport() {
-    document.getElementById('analyticsPeriod').textContent = `Prepared ${new Date().toLocaleString('en-PH', {dateStyle:'long',timeStyle:'short'})}`;
-    // Print the COMPLETE formal report, not just the currently selected tab.
-    const category = document.getElementById('analyticsViewFilter').value;
-    document.querySelectorAll('[data-analytics-view]').forEach(p=>p.classList.remove('hidden'));
+    // Print the owner analytics section only, using the currently selected period.
+    document.querySelectorAll('#tabContentAnalytics [data-analytics-view]').forEach(p=>p.classList.remove('hidden'));
     renderAnalytics();renderHomeboundForecast();
     requestAnimationFrame(()=>requestAnimationFrame(()=>{
         reportCharts.forEach(chart=>{try {chart.resize();}catch(_){}});
         try {hbForecastChart?.resize();}catch(_){}
-        window.addEventListener('afterprint',()=>setAnalyticsView(category),{once:true});
         window.print();
     }));
 }
@@ -2530,6 +2543,7 @@ async function loadOwnerInbox() {
             .map(c => ({ id:c.id, listing_id:c.listingId, updated_at:c.updatedAt }));
     }
     document.getElementById('badgeChatCount').textContent = ownerConversations.length;
+    renderOwnerOverviewDetails();
     const list = document.getElementById('ownerConversationList');
     list.innerHTML = ownerConversations.length ? ownerConversations.map(c =>
         `<button type="button" onclick="openOwnerConversation('${c.id}')" class="block w-full text-left p-3 border rounded-lg ${ownerConversationId===c.id?'bg-brand-50 border-brand-500':'bg-white border-slate-200'} hover:bg-brand-50">
@@ -2665,6 +2679,97 @@ function refreshDashboardStats() {
     const total = tenantRecords.filter(t => t.status === 'Active').reduce((sum,t) => sum + Number(t.monthly_rent || 0),0);
     document.getElementById('statRevenue').textContent = `₱${total.toLocaleString()}`;
     renderAdminTables();
+    renderOwnerOverviewDetails();
+}
+
+// Owner overview presentation only: reads existing records; never writes to Supabase.
+function renderOwnerOverviewDetails() {
+    const overview = document.getElementById('tabContentOverview');
+    if (!overview) return;
+    const listings = getOwnerListings();
+    const allBeds = listings.flatMap(d => (d.rooms || []).flatMap(r => displayBedSlots(r)));
+    const openBeds = allBeds.filter(b => b.status === 'Available').length;
+    const occupiedBeds = allBeds.filter(b => b.status === 'Occupied').length;
+    const percentage = allBeds.length ? Math.round(occupiedBeds / allBeds.length * 100) : 0;
+    const tenants = tenantRecords.filter(t => t.status === 'Active');
+    const paymentView = getPaymentViewRecords();
+    const today = currentPhilippineDate();
+    const month = today.slice(0, 7);
+    const paid = paymentView.filter(p => p.status === 'Paid' && String(p.paidAt || '').slice(0, 7) === month)
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const unpaid = paymentView.filter(p => p.status !== 'Paid' && p.dueDate <= today)
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const dueInMonth = paymentView.filter(p => String(p.dueDate).startsWith(month))
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const paidInMonthDues = paymentView.filter(p => String(p.dueDate).startsWith(month) && p.status === 'Paid')
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const percentPaid = dueInMonth ? Math.min(100, Math.round(100 * paidInMonthDues / dueInMonth)) : 0;
+    const set = (id, value) => { const node = document.getElementById(id); if (node) node.textContent = value; };
+    set('hbOverviewMonth', new Date().toLocaleDateString('en-PH', { month:'long', year:'numeric', timeZone:'Asia/Manila' }));
+    set('ownerOverviewDate', new Date().toLocaleDateString('en-PH', { month:'long', year:'numeric', timeZone:'Asia/Manila' }));
+    set('hbOverviewProperties', listings.length);
+    set('hbOverviewTenants', tenants.length);
+    set('hbOverviewOccupancy', `${percentage}%`);
+    set('hbOverviewPaid', formatPeso(paid));
+    set('hbOverviewOutstanding', formatPeso(unpaid));
+    set('hbOverviewPaidDetail', formatPeso(paid));
+    set('hbOverviewUnpaidDetail', formatPeso(unpaid));
+    set('hbOverviewDonutValue', `${percentage}%`);
+    const circle = document.getElementById('hbOverviewDonut');
+    if (circle) { circle.style.setProperty('--hb-occupancy', `${percentage}%`); circle.setAttribute('aria-label', `${percentage}% of ${allBeds.length} beds marked occupied`); }
+    const bar = document.getElementById('hbOverviewPaidBar');
+    if (bar) bar.style.width = `${percentPaid}%`;
+    const propertyBars = document.getElementById('hbOverviewPropertyBars');
+    if (propertyBars) propertyBars.innerHTML = listings.length ? listings.slice(0, 5).map(d => {
+        const beds = (d.rooms || []).flatMap(r => displayBedSlots(r));
+        const used = beds.filter(b => b.status === 'Occupied').length;
+        const pct = beds.length ? Math.round(used / beds.length * 100) : 0;
+        return `<div class="hb-overview-property-row"><div><span title="${escHtml(d.title)}">${escHtml(d.title)}</span><small>${used}/${beds.length} occupied</small></div><div class="hb-overview-track"><span style="width:${pct}%"></span></div></div>`;
+    }).join('') : '<p class="hb-overview-empty">No properties yet. Open My Properties to add one.</p>';
+
+    const holds = getOwnerHoldList();
+    const pendingVisits = holds.filter(h => h.status === 'Pending Approval').length;
+    const reservationRecords = typeof hbAdvanceOwnerRecords !== 'undefined' ? hbAdvanceOwnerRecords : [];
+    const pendingReservations = reservationRecords.filter(r => r.status === 'Pending').length;
+    const overdue = paymentView.filter(p => p.status === 'Overdue');
+    const attention = [
+        {label:'Overdue rent records', value:overdue.length, section:'payments', icon:'fa-receipt'},
+        {label:'Pending visitation requests', value:pendingVisits, section:'visitations', icon:'fa-calendar-check'},
+        {label:'Pending reservations', value:pendingReservations, section:'reservations', icon:'fa-calendar-days'},
+        {label:'Student conversations', value:ownerConversations.length, section:'chats', icon:'fa-comments'}
+    ].filter(x => x.value > 0);
+    const renderRow = item => `<button type="button" onclick="switchAdminTab('${item.section}')" class="hb-overview-row"><i class="fa-solid ${item.icon}" aria-hidden="true"></i><span>${escHtml(item.label)}</span><strong>${escHtml(item.value)}</strong></button>`;
+    const attentionNode = document.getElementById('hbOverviewAttention');
+    if (attentionNode) attentionNode.innerHTML = attention.length ? attention.map(renderRow).join('') : '<p class="hb-overview-empty">Nothing urgent in your recorded requests or rent dues.</p>';
+
+    const upcoming = [];
+    const inFuture = date => date && date >= today;
+    holds.filter(h => h.status === 'Confirmed Visit').forEach(h => {
+        const date = h.visit_date || h.visitDate;
+        if (inFuture(date)) upcoming.push({date, label:`Visit · ${lookupPropertyName(h.listing_id || h.dormId)}`, section:'visitations', icon:'fa-calendar-check'});
+    });
+    tenants.forEach(t => { if (inFuture(t.planned_end_date)) upcoming.push({date:t.planned_end_date,label:`Expected move-out · ${lookupPropertyName(t.listing_id)}`,section:'payments',icon:'fa-door-open'}); });
+    reservationRecords.filter(r => r.status === 'Approved').forEach(r => {
+        const date = r.move_in_date || r.moveIn;
+        if (inFuture(date)) upcoming.push({date,label:`Scheduled move-in · ${lookupPropertyName(r.listing_id || r.listingId)}`,section:'reservations',icon:'fa-key'});
+    });
+    upcoming.sort((a,b) => a.date.localeCompare(b.date));
+    const upcomingNode = document.getElementById('hbOverviewSchedules');
+    if (upcomingNode) upcomingNode.innerHTML = upcoming.length ? upcoming.slice(0,4).map(a => `<button type="button" onclick="switchAdminTab('${a.section}')" class="hb-overview-row"><i class="fa-solid ${a.icon}" aria-hidden="true"></i><span>${escHtml(a.label)}</span><small>${escHtml(a.date)}</small></button>`).join('') : '<p class="hb-overview-empty">No upcoming scheduled visits or moves.</p>';
+
+    const activity = [];
+    function addActivity(value, label, section, icon) {
+        const timestamp = String(value || '');
+        if (!/^\d{4}-\d{2}-\d{2}/.test(timestamp)) return;
+        activity.push({time:timestamp, label,section,icon});
+    }
+    holds.forEach(h => addActivity(h.created_at || h.timestamp, 'Visitation request received','visitations','fa-calendar-check'));
+    reservationRecords.forEach(r => addActivity(r.created_at || r.createdAt, 'Advance reservation request','reservations','fa-calendar-days'));
+    ownerConversations.forEach(c => addActivity(c.updated_at || c.updatedAt, 'Student conversation updated','chats','fa-comments'));
+    paymentView.filter(p => p.paidAt).forEach(p => addActivity(p.paidAt,'Payment marked paid','payments','fa-check-circle'));
+    activity.sort((a,b) => b.time.localeCompare(a.time));
+    const activityNode = document.getElementById('hbOverviewActivity');
+    if (activityNode) activityNode.innerHTML = activity.length ? activity.slice(0,4).map(a => `<button type="button" onclick="switchAdminTab('${a.section}')" class="hb-overview-row"><i class="fa-solid ${a.icon}" aria-hidden="true"></i><span>${escHtml(a.label)}</span><small>${escHtml(a.time.slice(0,10))}</small></button>`).join('') : '<p class="hb-overview-empty">No recent recorded activity.</p>';
 }
 function analyticsKpi(label,value,detail) {
     return `<div class="rounded-xl border border-slate-200 p-4 bg-slate-50"><div class="text-xs uppercase tracking-wider font-bold text-slate-500">${escHtml(label)}</div>
@@ -2673,92 +2778,113 @@ function analyticsKpi(label,value,detail) {
 function analyticsAdvice(title,detail) {
     return `<div class="p-3 border border-slate-200 rounded-lg bg-slate-50"><strong class="block text-slate-900 mb-1">${escHtml(title)}</strong><p class="text-slate-600">${escHtml(detail)}</p></div>`;
 }
-function renderAnalytics() {
-    if (!document.getElementById('analyticsKpis')) return;
-    const listings = getOwnerListings();
-    const rooms = listings.flatMap(d => d.rooms);
-    const availableRooms = rooms.filter(r => isRoomAvailable(r.status));
-    const holds = getOwnerHoldList();
-    const chats = ownerConversations;
-    const pending = holds.filter(h => h.status === 'Pending Approval').length;
-    const endedTenancies = tenantRecords.filter(t => t.status === 'Ended');
-    const endedLengths = endedTenancies.map(t => {
-        const begin = Date.parse(`${t.start_date}T00:00:00Z`);
-        const finish = Date.parse(`${t.end_date}T00:00:00Z`);
-        return Number.isFinite(begin) && Number.isFinite(finish) && finish >= begin
-            ? Math.round((finish - begin) / 86400000) : null;
-    }).filter(days => days !== null);
-    const avgEndedDays = endedLengths.length
-        ? `${Math.round(endedLengths.reduce((sum, days) => sum + days, 0) / endedLengths.length)} days`
-        : 'N/A';
-    const rateTotal = rooms.reduce((sum,r)=>sum + (Number(r.price)||0),0);
-    const availabilityPct = rooms.length ? Math.round(availableRooms.length / rooms.length * 100) : 0;
-    document.getElementById('analyticsPeriod').textContent = `Prepared ${new Date().toLocaleDateString('en-PH', {year:'numeric',month:'long',day:'numeric'})}`;
-    document.getElementById('analyticsSource').textContent = HomeboundStore.configured ?
-        'Source: Live owner listings, submitted hold requests and student conversations in Supabase.' :
-        'Source: Local sample properties, sample visitations and conversations in this browser. Not historical operating data.';
-    const dueRecords=getPaymentViewRecords();
-    const pastDue=dueRecords.filter(p=>p.status==='Overdue');
-    const openBeds=rooms.reduce((sum,r)=>sum+displayBedSlots(r).filter(b=>b.status==='Available').length,0);
-    const totalBeds=rooms.reduce((sum,r)=>sum+displayBedSlots(r).length,0);
-    document.getElementById('analyticsKpis').innerHTML = [
-        analyticsKpi('Properties',listings.length,'Managed listings'),
-        analyticsKpi('Beds available',`${openBeds}/${totalBeds}`,'Current open bed slots'),
-        analyticsKpi('Active tenants',tenantRecords.filter(t=>t.status==='Active').length,`${endedTenancies.length} historical tenancies`),
-        analyticsKpi('Pending visits',pending,'Awaiting review'),
-        analyticsKpi('Student inquiries',chats.length,'Recorded conversations'),
-        analyticsKpi('Overdue rent',formatPeso(pastDue.reduce((sum,p)=>sum+p.amount,0)),`${pastDue.length} payment records`)
-    ].join('');
-    const monthsShown = Math.max(3,Math.min(12,Number(document.getElementById('analyticsMonthRange')?.value || 6)));
-    const monthKeys=Array.from({length:monthsShown},(_,i)=>{
-        const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-(monthsShown-1-i));
-        return {key:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,
-            label:d.toLocaleString('en-PH',{month:'short',year:'numeric'})};
+// Month filters are shared by the owner analytics charts and their detail tables.
+function homeboundAnalyticsMonths() {
+    const control = document.getElementById('analyticsPeriodFilter');
+    const mode = control?.value || 'all';
+    const inputs = document.getElementById('analyticsRangeControls');
+    inputs?.classList.toggle('hidden', mode !== 'range');
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const initial = new Date(now.getFullYear(),now.getMonth()-5,1);
+    const defaultStart = `${initial.getFullYear()}-${String(initial.getMonth()+1).padStart(2,'0')}`;
+    const fromInput=document.getElementById('analyticsStartMonth');
+    const toInput=document.getElementById('analyticsEndMonth');
+    if(fromInput && !fromInput.value) fromInput.value=defaultStart;
+    if(toInput && !toInput.value) toInput.value=today;
+    const monthPattern=/^\d{4}-(0[1-9]|1[0-2])$/;
+    const recordedDates = [
+        ...ownerConversations.map(c=>c.created_at||c.createdAt||c.updated_at||c.updatedAt),
+        ...getOwnerHoldList().map(h=>h.created_at||h.timestamp||h.visit_date||h.visitDate),
+        ...tenantRecords.map(t=>t.start_date),
+        ...rentRecords.map(r=>r.due_date)
+    ].map(d=>String(d||'').slice(0,7)).filter(k=>monthPattern.test(k));
+    const earliest=recordedDates.length ? [recordedDates.sort()[0], today].sort()[0] : defaultStart;
+    let start=mode==='monthly'?today:mode==='range'?fromInput?.value:earliest;
+    let end=mode==='monthly'?today:mode==='range'?toInput?.value:today;
+    if(!monthPattern.test(start||'')||!monthPattern.test(end||'')||start>end){
+        document.getElementById('analyticsDateError')?.classList.remove('hidden');
+        return {months:[],start:null,end:null,mode,valid:false};
+    }
+    document.getElementById('analyticsDateError')?.classList.add('hidden');
+    const count=(Number(end.slice(0,4))-Number(start.slice(0,4)))*12+Number(end.slice(5,7))-Number(start.slice(5,7))+1;
+    const months=Array.from({length:count},(_,i)=>{
+        const d=new Date(Number(start.slice(0,4)),Number(start.slice(5,7))-1+i,1);
+        return {key:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,label:d.toLocaleString('en-PH',{month:'short',year:'numeric'})};
     });
-    const inquiries = monthKeys.map(m => chats.filter(c => (c.created_at || c.updatedAt || '').startsWith(m.key)).length);
-    const types = ['Dormitory','Bedspace','Apartment'];
-    const typeCount = types.map(t => listings.filter(d=>d.type===t).reduce((n,d)=>n+d.rooms.length,0));
-    const bands = [[0,3000],[3001,5000],[5001,10000],[10001,Infinity]];
-    const bandCounts = bands.map(([min,max])=>rooms.filter(r=>r.price>=min && r.price<=max).length);
-    const outcomeStatuses = ['Pending Approval','Confirmed Visit','Declined','Cancelled by Student','Expired'];
-    const outcomes = outcomeStatuses.map(status=>holds.filter(h=>h.status===status).length);
-    const recommendations = [];
-    const overdueDues = getPaymentViewRecords().filter(p => p.status === 'Overdue');
-    if (overdueDues.length) recommendations.push(analyticsAdvice('Follow up on overdue rent',
-        `${overdueDues.length} payment(s), totaling ${formatPeso(overdueDues.reduce((sum,p)=>sum+p.amount,0))}, are past due. Contact tenants and update payment records only after verifying receipt.`));
-    if (pending) recommendations.push(analyticsAdvice('Follow up on pending visits',`Review ${pending} request(s). Confirm or decline promptly so students can plan their inspection.`));
-    else recommendations.push(analyticsAdvice('Keep the request queue current','No pending visit requests. Continue monitoring the Visitation tab.'));
-    if (rooms.length && availableRooms.length) recommendations.push(analyticsAdvice('Promote vacancies',`${availableRooms.length} rooms are marked available. Add clear room photos, accurate rental prices and complete addresses to help students compare.`));
-    if (rooms.length && !availableRooms.length) recommendations.push(analyticsAdvice('Keep availability accurate','All listed rooms are marked full. Update availability as soon as rooms reopen.'));
-    if (chats.length) recommendations.push(analyticsAdvice('Respond to student inquiries',`${chats.length} student conversation(s) recorded. Review unanswered questions and respond with specific visit details.`));
-    else recommendations.push(analyticsAdvice('Encourage inquiries','No recorded student conversations yet. Keep contact details and images complete so prospective tenants can ask questions.'));
-    if (endedTenancies.length) recommendations.push(analyticsAdvice('Review tenancy turnover',
-        `${endedTenancies.length} tenancy record(s) have ended. Use their start and end dates to review stay duration and plan vacancy marketing.`));
-    if (rooms.length > 1) recommendations.push(analyticsAdvice('Review your advertised rent',`The average room rate is ₱${Math.round(rateTotal/rooms.length).toLocaleString()}/month. Compare rates against facilities and nearby properties; this is not collected revenue.`));
-    document.getElementById('analyticsRecommendations').innerHTML = recommendations.slice(0,3).join('');
-    const propertyRows = listings.map(d => `<tr class="border-b border-slate-100"><td class="p-2 font-semibold">${escHtml(d.title)}</td>
-        <td class="p-2">${d.rooms.length}</td><td class="p-2">${d.rooms.filter(r=>isRoomAvailable(r.status)).length}</td>
+    return {months,start,end,mode,valid:true};
+}
+
+function renderAnalytics() {
+    const container=document.getElementById('tabContentAnalytics');
+    if(!container)return;
+    const period=homeboundAnalyticsMonths();
+    const source=document.getElementById('analyticsSource');
+    const heading=document.getElementById('analyticsPeriod');
+    if(heading)heading.textContent=`Prepared ${new Date().toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})}` +
+        (period.valid ? ` · ${period.months[0]?.label} – ${period.months.at(-1)?.label}` : ' · Invalid month range');
+    if(source)source.textContent=HomeboundStore.configured
+        ? 'Source: Supabase listings, tenancy records, rent payments, visitation requests and conversations.'
+        : 'Source: Local demonstration data, not historical operating results.';
+    const rows=document.getElementById('analyticsPropertyRows');
+    const listings=getOwnerListings();
+    const chats=ownerConversations;
+    const holds=getOwnerHoldList();
+    if(!period.valid){
+        if(rows) rows.innerHTML='<tr><td colspan="6" class="p-4 text-amber-700">Select a valid month range (From must be before or equal to To).</td></tr>';
+        reportCharts.forEach(c=>c.destroy());reportCharts=[];
+        return;
+    }
+    const inPeriod=date=>{const month=String(date||'').slice(0,7);return Boolean(month && month>=period.start && month<=period.end);};
+    const datedChats=chats.filter(c=>inPeriod(c.created_at||c.createdAt||c.updated_at||c.updatedAt));
+    const datedHolds=holds.filter(h=>inPeriod(h.created_at||h.timestamp||h.visit_date||h.visitDate));
+    const inquirySeries=period.months.map(m=>datedChats.filter(c=>String(c.created_at||c.createdAt||c.updated_at||c.updatedAt||'').startsWith(m.key)).length);
+    const payments=getPaymentViewRecords();
+    const paid=payments.filter(p=>p.paidAt && inPeriod(p.paidAt));
+    // Income is verified PAID amounts, keyed to the payment's tenancy/listing.
+    const incomeSeries=listings.map(d=>paid.filter(p=>tenantRecords.some(t=>t.id===p.tenantId&&t.listing_id===d.id))
+        .reduce((sum,p)=>sum+Number(p.amount||0),0));
+    const totalBeds=listings.reduce((sum,d)=>sum+d.rooms.reduce((n,r)=>n+displayBedSlots(r).length,0),0);
+    // Snapshot capacity is the current inventory; historical room additions/removals are not recorded.
+    // Use overlapping tenancy days to estimate monthly bed occupancy instead of counting every
+    // tenant that occupied even a single day as a fully occupied month.
+    const occupancySeries=period.months.map(m=>{
+        const [y,mo]=m.key.split('-').map(Number);
+        const days=new Date(y,mo,0).getDate();
+        const first=`${m.key}-01`,last=`${m.key}-${String(days).padStart(2,'0')}`;
+        let occupiedDays=0;
+        for(const t of tenantRecords){
+            if(!t.start_date || !listings.some(d=>d.id===t.listing_id))continue;
+            const final=t.status==='Ended' ? t.end_date : (t.planned_end_date||last);
+            if(!final)continue;
+            const a=t.start_date>first?t.start_date:first;
+            const b=final<last?final:last;
+            if(a>b)continue;
+            occupiedDays += Math.round((Date.parse(`${b}T00:00:00Z`)-Date.parse(`${a}T00:00:00Z`))/86400000)+1;
+        }
+        return totalBeds && tenantRecords.length ? Math.round(Math.min(100,occupiedDays/(totalBeds*days)*1000))/10 : null;
+    });
+    if(rows)rows.innerHTML=listings.map(d=>`<tr class="border-b border-slate-100">
+        <td class="p-2 font-semibold">${escHtml(d.title)}</td>
+        <td class="p-2">${d.rooms.length}</td>
+        <td class="p-2">${d.rooms.filter(r=>isRoomAvailable(r.status)).length}</td>
         <td class="p-2">${escHtml(d.priceRangeStr)}</td>
-        <td class="p-2">${chats.filter(c=>(c.listing_id || c.listingId)===d.id).length}</td>
-        <td class="p-2">${holds.filter(h=>(h.listing_id || h.dormId)===d.id).length}</td></tr>`).join('');
-    document.getElementById('analyticsPropertyRows').innerHTML = propertyRows || '<tr><td colspan="6" class="p-4 text-slate-400">Add a property to see a performance breakdown.</td></tr>';
-    if (!window.Chart) return;
-    reportCharts.forEach(chart=>chart.destroy()); reportCharts = [];
-    const makeChart = (id,type,labels,data,colors) => {
-        const canvas = document.getElementById(id);
-        if (!canvas) return;
-        reportCharts.push(new Chart(canvas,{
-            type,
-            data:{labels,datasets:[{label:'Count',data,backgroundColor:colors,borderColor:'#15803d',borderRadius:type==='bar'?5:0,tension:.3}]},
-            options:{responsive:true,maintainAspectRatio:false,animation:false,
-                plugins:{legend:{display:type==='doughnut'},tooltip:{enabled:true}},
-                scales:type==='doughnut'?{}:{y:{beginAtZero:true,ticks:{precision:0}}}}
-        }));
+        <td class="p-2">${datedChats.filter(c=>(c.listing_id||c.listingId)===d.id).length}</td>
+        <td class="p-2">${datedHolds.filter(h=>(h.listing_id||h.dormId)===d.id).length}</td></tr>`).join('') ||
+        '<tr><td colspan="6" class="p-4 text-slate-400">Add a property to see a performance breakdown.</td></tr>';
+    if(!window.Chart){document.getElementById('analyticsChartNotice')?.classList.remove('hidden');return;}
+    document.getElementById('analyticsChartNotice')?.classList.add('hidden');
+    reportCharts.forEach(c=>c.destroy());reportCharts=[];
+    const create=(id,type,labels,values,label,percent=false)=>{
+        const node=document.getElementById(id);if(!node)return;
+        reportCharts.push(new Chart(node,{type,
+            data:{labels,datasets:[{label,data:values,borderColor:'#15803d',backgroundColor:'#16a34a',borderRadius:type==='bar'?5:0,tension:.3,spanGaps:false}]},
+            options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{display:false}},
+                scales:{y:{beginAtZero:true,max:percent?100:undefined,ticks:{callback:percent?(v=>`${v}%`):undefined,precision:percent?undefined:0}}}}}));
     };
-    makeChart('chartSeasonalInflux','bar',monthKeys.map(m=>m.label),inquiries,'#16a34a');
-    makeChart('chartRoomShare','doughnut',types,typeCount,['#16a34a','#0284c7','#f59e0b']);
-    makeChart('chartPriceBands','bar',['≤ ₱3k','₱3k–5k','₱5k–10k','> ₱10k'],bandCounts,'#0284c7');
-    makeChart('chartHoldOutcomes','bar',['Pending','Confirmed','Declined','Cancelled','Expired'],outcomes,'#f59e0b');
+    create('chartSeasonalInflux','bar',period.months.map(m=>m.label),inquirySeries,'Student inquiries');
+    create('chartIncomePerProperty','bar',listings.map(d=>d.title),incomeSeries,'Paid income (₱)');
+    create('chartMonthlyOccupancy','line',period.months.map(m=>m.label),occupancySeries,'Estimated occupancy (%)',true);
 }
 
 /* ==========================================================================

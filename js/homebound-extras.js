@@ -738,49 +738,50 @@ async function editPlannedEndDate(tenancyId) {
     }catch(e){showToast(`Could not save date: ${e.message}`,'error');}
 }
 
-function setAnalyticsView(value='overview') {
-    document.querySelectorAll('[data-analytics-view]').forEach(block=>block.classList.toggle('hidden',value!=='all'&&block.dataset.analyticsView!==value));
-    requestAnimationFrame(()=>{
-        reportCharts.forEach(c=>{try{c.resize();}catch(_){}});
-        try{hbForecastChart?.resize();}catch(_){}
+function setAnalyticsView() {
+    // Analytics is now one owner-only workspace; retain this function for compatibility.
+    document.querySelectorAll('#tabContentAnalytics [data-analytics-view]')
+        .forEach(block => block.classList.remove('hidden'));
+    requestAnimationFrame(() => {
+        reportCharts.forEach(chart => { try { chart.resize(); } catch (_) {} });
+        try { hbForecastChart?.resize(); } catch (_) {}
     });
 }
+
 function renderHomeboundForecast() {
-    const target=document.getElementById('forecastSummary'),rows=document.getElementById('forecastMonthlyRows');
-    if(!target)return;
-    const payments=getPaymentViewRecords();
+    const rows=document.getElementById('forecastMonthlyRows');
+    if(!rows)return;
+    const period=homeboundAnalyticsMonths();
+    if(!period.valid){rows.innerHTML='';hbForecastChart?.destroy();hbForecastChart=null;return;}
     const now=new Date();
-    const months=Array.from({length:12},(_,i)=>{
-        const dt=new Date(now.getFullYear(),now.getMonth()-5+i,1);
-        const end=new Date(dt.getFullYear(),dt.getMonth()+1,0);
-        return {key:`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`,
-          first:`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-01`,
-          last:`${end.getFullYear()}-${String(end.getMonth()+1).padStart(2,'0')}-${String(end.getDate()).padStart(2,'0')}`,
-          label:dt.toLocaleString('en-PH',{month:'short',year:'numeric'}),future:i>=6};
+    const thisMonth=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    let selected=period.months;
+    if(period.mode==='all'){
+        // Keep the existing historical plus six-month forward outlook for All data.
+        selected=Array.from({length:12},(_,i)=>{
+            const d=new Date(now.getFullYear(),now.getMonth()-5+i,1);
+            return {key:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,label:d.toLocaleString('en-PH',{month:'short',year:'numeric'})};
+        });
+    }
+    const months=selected.map(m=>{
+        const [y,mo]=m.key.split('-').map(Number);
+        const lastDay=new Date(y,mo,0).getDate();
+        return {...m,first:`${m.key}-01`,last:`${m.key}-${String(lastDay).padStart(2,'0')}`,future:m.key>thisMonth};
     });
-    const historical=months.map(m=>m.future?null:payments.filter(p=>String(p.dueDate).startsWith(m.key)).reduce((n,p)=>n+Number(p.amount||0),0));
+    const payments=getPaymentViewRecords();
+    const historical=months.map(m=>m.future?null:payments.filter(p=>String(p.dueDate).startsWith(m.key))
+        .reduce((n,p)=>n+Number(p.amount||0),0));
     const projected=months.map(m=>!m.future?null:tenantRecords.filter(t=>
-        t.status==='Active' && t.start_date<=m.last && (!t.planned_end_date || t.planned_end_date>=m.first))
+        t.status==='Active'&&t.start_date<=m.last&&(!t.planned_end_date||t.planned_end_date>=m.first))
         .reduce((sum,t)=>sum+Number(t.monthly_rent||0),0));
-    const nonZero=months.map((m,i)=>({m,val:historical[i]})).filter(x=>x.val!==null&&x.val>0);
-    const peak=nonZero.reduce((best,x)=>!best||x.val>best.val?x:best,null);
-    const coming=tenantRecords.filter(t=>t.status==='Active' && t.planned_end_date && t.planned_end_date>=currentPhilippineDate())
-        .sort((a,b)=>a.planned_end_date.localeCompare(b.planned_end_date));
-    const nextFuture=months.find((m,i)=>projected[i]!==null);
-    const nextIndex=nextFuture?months.indexOf(nextFuture):-1;
-    const summary=[
-        ['Next month projection',nextIndex>=0?formatPeso(projected[nextIndex]):'—','Based on active contracts'],
-        ['Recorded peak dues',peak?peak.m.label:'No history',peak?formatPeso(peak.val):'No recorded dues'],
-        ['Upcoming move-outs',String(coming.length),coming.length?`Next: ${coming[0].planned_end_date}`:'No expected dates ahead']
-    ];
-    target.innerHTML=summary.map(([title,value,note])=>`<div class="rounded-xl border bg-slate-50 p-3"><p class="text-xs text-slate-500">${escHtml(title)}</p><p class="text-lg font-bold">${escHtml(value)}</p><p class="text-xs text-slate-500">${escHtml(note)}</p></div>`).join('');
-    if(rows)rows.innerHTML=months.map((m,i)=>`<tr class="border-b border-slate-100"><td class="p-2 whitespace-nowrap">${escHtml(m.label)}</td><td class="p-2">${historical[i]===null?'—':escHtml(formatPeso(historical[i]))}</td><td class="p-2">${projected[i]===null?'—':escHtml(formatPeso(projected[i]))}</td><td class="p-2 text-slate-500">${m.future?'Estimate from currently active agreements':'Recorded due amounts'}</td></tr>`).join('');
+    rows.innerHTML=months.map((m,i)=>`<tr class="border-b border-slate-100"><td class="p-2 whitespace-nowrap">${escHtml(m.label)}</td><td class="p-2">${historical[i]===null?'—':escHtml(formatPeso(historical[i]))}</td><td class="p-2">${projected[i]===null?'—':escHtml(formatPeso(projected[i]))}</td><td class="p-2 text-slate-500">${m.future?'Estimate from active agreements':'Recorded dues, not received income'}</td></tr>`).join('');
     if(!window.Chart)return;
     hbForecastChart?.destroy();
-    hbForecastChart=new Chart(document.getElementById('chartRentMonthly'),{
+    const canvas=document.getElementById('chartRentMonthly');if(!canvas)return;
+    hbForecastChart=new Chart(canvas,{
         type:'bar',data:{labels:months.map(m=>m.label),datasets:[
             {label:'Recorded rent dues (₱)',data:historical,backgroundColor:'#059669'},
-            {label:'Estimated contracted rent (₱)',data:projected,backgroundColor:'#60a5fa'}]},
+            {label:'Projected contractual rent (₱)',data:projected,backgroundColor:'#60a5fa'}]},
         options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{
             tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${formatPeso(ctx.parsed.y)}`}}},
             scales:{y:{beginAtZero:true,ticks:{callback:val=>`₱${Number(val).toLocaleString()}`}}}}

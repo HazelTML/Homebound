@@ -154,8 +154,24 @@
 </main>
 
 <!-- OWNER / ADMIN PORTAL VIEW (Hidden by default) -->
-<main id="ownerPortalView" class="hidden flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-    
+<main id="ownerPortalView" class="hidden hb-owner-portal flex-1 w-full" aria-label="Landlord management dashboard">
+  <div class="hb-owner-shell">
+    <aside class="hb-owner-sidebar" aria-label="Owner navigation">
+      <div class="hb-owner-brand"><i class="fa-solid fa-building-user" aria-hidden="true"></i><div><strong>Homebound</strong><small>OWNER WORKSPACE</small></div></div>
+      <p class="hb-owner-nav-heading">MANAGEMENT</p>
+      <nav class="hb-owner-navigation" aria-label="Owner dashboard sections">
+<button type="button" id="tabBtnOverview" class="admin-tab-btn hb-owner-nav-btn hb-owner-active" onclick="switchAdminTab('overview')" aria-current="page"><i class="fa-solid fa-layout-dashboard" aria-hidden="true"></i><span>Overview</span></button>
+<button type="button" id="tabBtnListings" class="admin-tab-btn hb-owner-nav-btn" onclick="switchAdminTab('listings')" aria-current="false"><i class="fa-solid fa-building" aria-hidden="true"></i><span>My Properties</span></button>
+<button type="button" id="tabBtnVisitations" class="admin-tab-btn hb-owner-nav-btn" onclick="switchAdminTab('visitations')" aria-current="false"><i class="fa-solid fa-calendar-check" aria-hidden="true"></i><span>Visitations</span><span id="badgeVisitCount" class="hb-owner-count">0</span></button>
+<button type="button" id="tabBtnReservations" class="admin-tab-btn hb-owner-nav-btn" onclick="switchAdminTab('reservations')" aria-current="false"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><span>Reservations</span><span id="badgeReservationCount" class="hb-owner-count">0</span></button>
+<button type="button" id="tabBtnPayments" class="admin-tab-btn hb-owner-nav-btn" onclick="switchAdminTab('payments')" aria-current="false"><i class="fa-solid fa-users" aria-hidden="true"></i><span>Tenants & Rent</span><span id="badgeOverdueCount" class="hb-owner-count">0</span></button>
+<button type="button" id="tabBtnChats" class="admin-tab-btn hb-owner-nav-btn" onclick="switchAdminTab('chats')" aria-current="false"><i class="fa-solid fa-comments" aria-hidden="true"></i><span>Messages</span><span id="badgeChatCount" class="hb-owner-count">0</span></button>
+<button type="button" id="tabBtnAnnouncements" class="admin-tab-btn hb-owner-nav-btn" onclick="switchAdminTab('announcements')" aria-current="false"><i class="fa-solid fa-bullhorn" aria-hidden="true"></i><span>Announcements</span></button>
+<button type="button" id="tabBtnAnalytics" class="admin-tab-btn hb-owner-nav-btn" onclick="switchAdminTab('analytics')" aria-current="false"><i class="fa-solid fa-chart-line" aria-hidden="true"></i><span>Analytics</span></button>
+      </nav>
+      <div class="hb-owner-sidebar-foot"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i> Single-owner management</div>
+    </aside>
+    <div class="hb-owner-main">
     <!-- Admin Top Header Banner -->
     <div class="bg-slate-900 text-white rounded-2xl p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -167,94 +183,68 @@
             <p class="text-sm text-slate-300">The essentials for your rentals, in one place.</p>
         </div>
         
-        <div class="flex items-center space-x-3">
-            <button onclick="openNewListingModal()" class="bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition flex items-center shadow-lg shadow-brand-600/30">
-                <i class="fa-solid fa-plus mr-2"></i> Add New Unit/Listing
-            </button>
-        </div>
+        <div class="hb-owner-header-date" id="ownerOverviewDate" aria-label="Current month"></div>
     </div>
 
-    <!-- Overview Stat Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-            <div>
-                <span class="text-xs font-semibold text-slate-400 uppercase">Rooms Available</span>
-                <p class="text-2xl font-black text-slate-900" id="statOccupancy">—</p>
-                <span class="text-[10px] text-brand-600 font-semibold">Updated from room records</span>
-            </div>
-            <div class="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center text-brand-600 font-bold">
-                <i class="fa-solid fa-bed text-lg"></i>
-            </div>
+
+      <section id="tabContentOverview" class="hb-owner-overview space-y-4" aria-label="Owner overview">
+        <div class="hb-overview-section-head">
+          <div><h2>Overview</h2><p>Key property information and items needing your attention.</p></div>
+          <span id="hbOverviewMonth" class="hb-overview-month"></span>
         </div>
-
-        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-            <div>
-                <span class="text-xs font-semibold text-slate-400 uppercase">Contracted Monthly Rent</span>
-                <p class="text-2xl font-black text-slate-900" id="statRevenue">—</p>
-                <span class="text-[10px] text-slate-400">Active tenant agreements</span>
-            </div>
-            <div class="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 font-bold">
-                <i class="fa-solid fa-peso-sign text-lg"></i>
-            </div>
+        <div class="hb-overview-kpis" aria-label="Rental performance summary">
+          <div class="hb-overview-kpi"><span>Properties</span><strong id="hbOverviewProperties">—</strong><small>Managed listings</small></div>
+          <div class="hb-overview-kpi"><span>Active tenants</span><strong id="hbOverviewTenants">—</strong><small>Current agreements</small></div>
+          <div class="hb-overview-kpi"><span>Occupancy</span><strong id="hbOverviewOccupancy">—</strong><small>Occupied beds</small></div>
+          <div class="hb-overview-kpi"><span>Available beds</span><strong id="statOccupancy">—</strong><small>Of total capacity</small></div>
+          <div class="hb-overview-kpi"><span>Paid this month</span><strong id="hbOverviewPaid">—</strong><small>Recorded payments</small></div>
+          <div class="hb-overview-kpi"><span>Outstanding</span><strong id="hbOverviewOutstanding">—</strong><small>Unpaid rent due to date</small></div>
         </div>
-
-        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-            <div>
-                <span class="text-xs font-semibold text-slate-400 uppercase">Visit / Hold Requests</span>
-                <p class="text-2xl font-black text-amber-600" id="statPendingVisits">3</p>
-                <span class="text-[10px] font-semibold text-amber-600">Awaiting owner decision</span>
+        <div class="hb-overview-main-grid">
+          <section class="hb-overview-panel" aria-labelledby="hbOccupancyTitle">
+            <div class="hb-overview-panel-head"><h3 id="hbOccupancyTitle">Occupancy overview</h3><button type="button" onclick="switchAdminTab('listings')">View properties <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button></div>
+            <div class="hb-overview-occupancy-body">
+              <div class="hb-overview-donut" id="hbOverviewDonut" role="img" aria-label="Occupancy percentage"><div><strong id="hbOverviewDonutValue">—</strong><small>occupied</small></div></div>
+              <div id="hbOverviewPropertyBars" class="hb-overview-property-bars"><p class="hb-overview-empty">No property data yet.</p></div>
             </div>
-            <div class="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 font-bold">
-                <i class="fa-solid fa-calendar-day text-lg"></i>
-            </div>
+          </section>
+          <section class="hb-overview-panel" aria-labelledby="hbFinanceTitle">
+            <div class="hb-overview-panel-head"><h3 id="hbFinanceTitle">Monthly financial summary</h3><button type="button" onclick="switchAdminTab('payments')">Rent records <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button></div>
+            <p class="hb-overview-caption">Contracted monthly rent</p>
+            <strong id="statRevenue" class="hb-overview-finance-total">—</strong>
+            <div class="hb-overview-progress" role="img" aria-label="Paid versus outstanding rent"><span id="hbOverviewPaidBar"></span></div>
+            <div class="hb-overview-finance-split"><div><span>Paid this month</span><strong id="hbOverviewPaidDetail">—</strong></div><div><span>Unpaid dues to date</span><strong id="hbOverviewUnpaidDetail">—</strong></div></div>
+            <p class="hb-overview-fineprint">Based on recorded rent payments; no money is processed here.</p>
+          </section>
         </div>
-
-        <span id="statActiveHolds" class="hidden" aria-hidden="true">0</span>
-
-        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-            <div>
-                <span class="text-xs font-semibold text-slate-400 uppercase">Overdue Payments</span>
-                <p class="text-2xl font-black text-rose-600" id="statOverdueCount">0</p>
-                <span class="text-[10px] text-rose-500 font-semibold">Reminders pending</span>
-            </div>
-            <div class="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600 font-bold">
-                <i class="fa-solid fa-bell text-lg"></i>
-            </div>
+        <div class="hb-overview-lower-grid">
+          <section class="hb-overview-panel" aria-labelledby="hbAttentionTitle">
+            <div class="hb-overview-panel-head"><h3 id="hbAttentionTitle">Attention required</h3></div>
+            <div id="hbOverviewAttention" class="hb-overview-rows"></div>
+          </section>
+          <section class="hb-overview-panel" aria-labelledby="hbSchedulesTitle">
+            <div class="hb-overview-panel-head"><h3 id="hbSchedulesTitle">Upcoming schedules</h3></div>
+            <div id="hbOverviewSchedules" class="hb-overview-rows"></div>
+          </section>
+          <section class="hb-overview-panel" aria-labelledby="hbActivityTitle">
+            <div class="hb-overview-panel-head"><h3 id="hbActivityTitle">Recent activity</h3></div>
+            <div id="hbOverviewActivity" class="hb-overview-rows"></div>
+          </section>
         </div>
-    </div>
-
-    <!-- Admin Tabs Container -->
-    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        
-        <!-- Tab Navigation Bar -->
-        <div class="flex border-b border-slate-200 overflow-x-auto bg-slate-50/50">
-            <button onclick="switchAdminTab('visitations')" id="tabBtnVisitations" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-brand-600 text-brand-600 flex items-center space-x-2 whitespace-nowrap">
-                <i class="fa-solid fa-clipboard-list"></i>
-                <span>Visitations & Hold Requests</span>
-                <span id="badgeVisitCount" class="bg-brand-100 text-brand-800 text-[10px] px-2 py-0.5 rounded-full font-extrabold">3</span>
-            </button>
-            <button onclick="switchAdminTab('reservations')" id="tabBtnReservations" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap"><i class="fa-solid fa-calendar-check"></i><span>Reservations</span><span id="badgeReservationCount" class="bg-amber-100 text-amber-900 text-[10px] px-2 py-0.5 rounded-full">0</span></button>
-            <button onclick="switchAdminTab('payments')" id="tabBtnPayments" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap">
-                <i class="fa-solid fa-receipt"></i>
-                <span>Tenants & Payments</span>
-                <span id="badgeOverdueCount" class="bg-rose-100 text-rose-800 text-[10px] px-2 py-0.5 rounded-full font-extrabold">2</span>
-            </button>
-            <button onclick="switchAdminTab('listings')" id="tabBtnListings" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap">
-                <i class="fa-solid fa-list-check"></i>
-                <span>My Property Listings</span>
-            </button>
-            <button onclick="switchAdminTab('chats')" id="tabBtnChats" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap">
-                <i class="fa-solid fa-comments"></i><span>Student Messages</span><span id="badgeChatCount" class="bg-brand-100 text-brand-800 text-[10px] px-2 py-0.5 rounded-full">0</span>
-            </button>
-            <button onclick="switchAdminTab('announcements')" id="tabBtnAnnouncements" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap"><i class="fa-solid fa-bullhorn"></i><span>Announcements</span></button>
-            <button onclick="switchAdminTab('analytics')" id="tabBtnAnalytics" class="admin-tab-btn px-5 py-3.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-900 flex items-center space-x-2 whitespace-nowrap">
-                <i class="fa-solid fa-chart-line"></i>
-                <span>Analytics</span>
-            </button>
-        </div>
-
+        <!-- Preserve legacy stat elements required by existing Homebound workflows. -->
+        <div class="hidden" aria-hidden="true"><span id="statPendingVisits">0</span><span id="statOverdueCount">0</span><span id="statActiveHolds">0</span></div>
+        <section class="hb-owner-overview-actions" aria-label="Quick actions">
+          <div><h2>Quick actions</h2><p>Open a workspace to continue managing your rentals.</p></div>
+          <div class="hb-owner-shortcuts">
+            <button type="button" onclick="switchAdminTab('payments')"><i class="fa-solid fa-receipt" aria-hidden="true"></i> Rent records</button>
+            <button type="button" onclick="switchAdminTab('announcements')"><i class="fa-solid fa-bullhorn" aria-hidden="true"></i> Announcements</button>
+            <button type="button" onclick="switchAdminTab('analytics')"><i class="fa-solid fa-chart-line" aria-hidden="true"></i> View analytics</button>
+          </div>
+        </section>
+      </section>
+      <div id="hbOwnerWorkspaceContent" class="hidden hb-owner-workspace bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <!-- Tab 1: Visitations & Holds -->
-        <div id="tabContentVisitations" class="p-6 space-y-4">
+        <div id="tabContentVisitations" class="hidden p-6 space-y-4">
             <div class="flex items-center justify-between">
                 <div>
                     <h3 class="font-bold text-slate-900 text-base">Incoming Student Visitation & Hold Requests</h3>
@@ -344,9 +334,9 @@
 
         <!-- Tab 3: Listing Management -->
         <div id="tabContentListings" class="hidden p-6 space-y-4">
-            <div class="flex justify-between items-center">
-                <h3 class="font-bold text-slate-900 text-base">Active Property Inventory</h3>
-                <span class="text-xs text-slate-500">Live toggles immediately update availability on student searches</span>
+            <div class="flex flex-wrap justify-between items-center gap-3">
+                <div><h3 class="font-bold text-slate-900 text-base">My Property Listings</h3><p class="text-xs text-slate-500 mt-1">Manage rooms, bed availability and property details.</p></div>
+                <button type="button" onclick="openNewListingModal()" class="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-brand-700"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add Property</button>
             </div>
             <div id="adminListingsContainer" class="flex flex-col gap-3">
                 <!-- Javascript Populated -->
@@ -381,41 +371,39 @@
             </div>
         </div>
 
-        <!-- Focused analytics: show one report category at a time -->
+        <!-- Owner analytics: all detailed reports grouped in one workspace -->
         <section id="tabContentAnalytics" class="hidden p-5 space-y-4 analytics-report">
           <div class="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
             <div><p class="text-xs uppercase font-bold tracking-widest text-emerald-700">Homebound / Management Report</p>
               <h3 class="text-xl font-bold">Analytics & forecasting</h3><p id="analyticsPeriod" class="text-xs text-slate-500"></p></div>
             <div class="flex flex-wrap items-center gap-2 print-hide">
-              <label class="text-xs font-semibold">Inquiries
-                <select id="analyticsMonthRange" onchange="renderAnalytics()" class="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm ml-1">
-                  <option value="3">3 months</option><option value="6" selected>6 months</option><option value="12">12 months</option>
-                </select></label>
-              <label class="text-xs font-semibold">View
-                <select id="analyticsViewFilter" onchange="setAnalyticsView(this.value)" class="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm ml-1">
-                  <option value="overview">Highlights</option><option value="all">All reports</option><option value="demand">Student demand</option>
-                  <option value="rent">Rent & forecast</option><option value="properties">By property</option>
-                </select></label>
-              <button type="button" onclick="printAnalyticsReport()" class="simple-icon-btn" title="Print report" aria-label="Print analytics report"><i class="fa-solid fa-print"></i></button>
+              <label for="analyticsPeriodFilter" class="text-xs font-semibold text-slate-700">Period</label>
+              <select id="analyticsPeriodFilter" onchange="refreshOwnerAnalyticsPeriod()" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+                <option value="all" selected>All data</option>
+                <option value="monthly">This month</option>
+                <option value="range">Month range</option>
+              </select>
+              <span id="analyticsRangeControls" class="hidden flex flex-wrap items-center gap-2">
+                <label for="analyticsStartMonth" class="text-xs text-slate-600">From</label>
+                <input id="analyticsStartMonth" type="month" aria-label="Start month" class="rounded-lg border border-slate-300 px-2 py-2 text-sm" onchange="refreshOwnerAnalyticsPeriod()">
+                <label for="analyticsEndMonth" class="text-xs text-slate-600">To</label>
+                <input id="analyticsEndMonth" type="month" aria-label="End month" class="rounded-lg border border-slate-300 px-2 py-2 text-sm" onchange="refreshOwnerAnalyticsPeriod()">
+              </span>
+              <button type="button" onclick="printAnalyticsReport()" class="simple-icon-btn" title="Print analytics report" aria-label="Print analytics report"><i class="fa-solid fa-print"></i></button>
             </div>
           </div>
+          <p id="analyticsDateError" class="hidden text-xs text-rose-700" role="alert">Choose a valid month range (From must not be after To).</p>
           <p id="analyticsSource" class="text-xs text-slate-500"></p>
           <p id="analyticsChartNotice" class="hidden rounded-lg bg-amber-50 border border-amber-200 text-amber-900 p-3 text-xs">Chart library unavailable. Summary figures and month-by-month tables remain available. Check your internet connection to display charts.</p>
-          <div id="analyticsKpis" class="analytics-kpis grid grid-cols-2 lg:grid-cols-4 gap-3"></div>
-          <div data-analytics-view="overview" class="analytics-view space-y-3">
-            <div class="analytics-panel"><h4>Where to focus</h4><div id="analyticsRecommendations" class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm"></div></div>
+          <div data-analytics-view="demand" class="analytics-view grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div class="analytics-panel"><h4>Student inquiries by month</h4><p>Month and year, from recorded conversations</p><div class="h-64"><canvas id="chartSeasonalInflux"></canvas></div></div>
+            <div class="analytics-panel"><h4>Income received by property</h4><p>Verified payments marked paid in the selected period</p><div class="h-64"><canvas id="chartIncomePerProperty"></canvas></div></div>
           </div>
-          <div data-analytics-view="demand" class="analytics-view hidden grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <div class="analytics-panel"><h4>Monthly student inquiries</h4><p>Month and year, from recorded conversations</p><div class="h-64"><canvas id="chartSeasonalInflux"></canvas></div><div class="text-xs text-slate-500 mt-2">Month-by-month counts use recorded conversation dates.</div></div>
-            <div class="analytics-panel"><h4>Visitation outcomes</h4><p>Requests by actual review status</p><div class="h-64"><canvas id="chartHoldOutcomes"></canvas></div></div>
+          <div data-analytics-view="rent" class="analytics-view space-y-3">
+            <div class="analytics-panel"><h4>Rent dues & contracted rent forecast</h4><div class="h-72"><canvas id="chartRentMonthly"></canvas></div><details class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3"><summary class="cursor-pointer text-xs font-semibold text-slate-700">Monthly figures & methodology</summary><p id="forecastNote" class="text-xs text-slate-500 mt-2">Historical amounts use recorded due dates; future values are projections, not collected income.</p><div class="overflow-x-auto"><table class="w-full text-left text-xs mt-3"><thead><tr class="border-b"><th class="p-2">Month</th><th class="p-2">Recorded dues</th><th class="p-2">Projected contractual rent</th><th class="p-2">Basis</th></tr></thead><tbody id="forecastMonthlyRows"></tbody></table></div></details></div>
+            <div class="analytics-panel"><h4>Occupancy rate by month</h4><p>Estimated bed occupancy from tenancy dates and current bed capacity</p><div class="h-60"><canvas id="chartMonthlyOccupancy"></canvas></div><p class="text-xs text-slate-500 mt-2">Historical capacity changes are not recorded; rates are estimates, not audited occupancy.</p></div>
           </div>
-          <div data-analytics-view="rent" class="analytics-view hidden space-y-3">
-            <div id="forecastSummary" class="grid grid-cols-1 md:grid-cols-3 gap-3"></div>
-            <div class="analytics-panel"><h4>Monthly recorded dues & estimated contracted rent</h4><p id="forecastNote">Historical amounts use recorded due dates; future values are projections, not collected income.</p><div class="h-72"><canvas id="chartRentMonthly"></canvas></div><div class="overflow-x-auto"><table class="w-full text-left text-xs mt-3"><thead><tr class="border-b"><th class="p-2">Month</th><th class="p-2">Recorded dues</th><th class="p-2">Projected contractual rent</th><th class="p-2">Basis</th></tr></thead><tbody id="forecastMonthlyRows"></tbody></table></div></div>
-            <div class="analytics-panel"><h4>Advertised room rates</h4><p>Room counts by price range</p><div class="h-60"><canvas id="chartPriceBands"></canvas></div></div>
-          </div>
-          <div data-analytics-view="properties" class="analytics-view hidden space-y-3">
-            <div class="analytics-panel"><h4>Room supply by type</h4><div class="h-56"><canvas id="chartRoomShare"></canvas></div></div>
+          <div data-analytics-view="properties" class="analytics-view space-y-3">
             <div class="analytics-panel"><h4>Property performance</h4><div class="overflow-x-auto mt-3"><table class="w-full text-left text-sm"><thead class="bg-slate-100"><tr><th class="p-2">Property</th><th class="p-2">Rooms</th><th class="p-2">Available</th><th class="p-2">Rent range</th><th class="p-2">Inquiries</th><th class="p-2">Visits</th></tr></thead><tbody id="analyticsPropertyRows"></tbody></table></div></div>
           </div>
           <p class="text-xs text-slate-500">Only recorded information is shown. Forecasts assume active contracts continue unless a planned end date is entered.</p>
@@ -446,8 +434,10 @@
           </form>
           <div id="ownerAnnouncements" class="space-y-2 text-sm"></div>
         </section>
-    </div>
 
+      </div>
+    </div>
+  </div>
 </main>
 
 <!-- Persistent student quick-access tools. Only one panel opens at a time. -->

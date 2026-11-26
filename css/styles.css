@@ -451,3 +451,135 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .hb-calendar-day.hb-day-selected{background:#a7f3d0;color:#064e3b;border:1px solid #059669;outline:none}
 .hb-calendar-day.hb-day-start,.hb-calendar-day.hb-day-end{background:#047857;color:#fff;border:2px solid #064e3b;box-shadow:0 0 0 2px #a7f3d0;outline:none;opacity:1}
 .hb-calendar-day.hb-day-start::after,.hb-calendar-day.hb-day-end::after{content:'•';font-size:9px;display:block;line-height:5px}
+
+
+/* === Homebound OWNER-ONLY dashboard redesign ===
+   All rules are scoped to #ownerPortalView. Student pages are unchanged. */
+#ownerPortalView.hb-owner-portal {max-width:none; padding:0; margin:0;}
+#ownerPortalView .hb-owner-shell {display:grid; grid-template-columns:230px minmax(0,1fr); min-height:calc(100vh - 64px); background:#f5f7f8;}
+#ownerPortalView .hb-owner-sidebar {background:#112a22; color:#f8fafc; padding:22px 12px; display:flex; flex-direction:column; gap:12px;}
+#ownerPortalView .hb-owner-brand {display:flex; align-items:center; gap:12px; padding:8px 12px 20px; border-bottom:1px solid #ffffff20;}
+#ownerPortalView .hb-owner-brand > i {font-size:22px;color:#86efac;}
+#ownerPortalView .hb-owner-brand strong {display:block; font-size:16px;line-height:1.3;}
+#ownerPortalView .hb-owner-brand small {display:block; font-size:10px;letter-spacing:.11em;color:#a7c4b5;margin-top:4px;}
+#ownerPortalView .hb-owner-nav-heading {font-size:10px;letter-spacing:.15em;font-weight:700;color:#9fb8ad;padding:12px 12px 0;margin:0;}
+#ownerPortalView .hb-owner-navigation {display:flex;flex-direction:column;gap:4px;}
+#ownerPortalView .hb-owner-navigation .admin-tab-btn {display:flex;min-height:42px;align-items:center;gap:11px;width:100%;padding:10px 12px;border:0;border-radius:10px;background:transparent;color:#d6e5dc;text-align:left;transition:background .16s ease;white-space:normal;font-size:12px;line-height:1.4;}
+#ownerPortalView .hb-owner-navigation .admin-tab-btn i {width:17px;text-align:center;flex-shrink:0;color:#a8d5b9;}
+#ownerPortalView .hb-owner-navigation .admin-tab-btn span:nth-child(2) {flex:1;}
+#ownerPortalView .hb-owner-navigation .admin-tab-btn:hover,#ownerPortalView .hb-owner-navigation .admin-tab-btn:focus-visible {background:#214c39;outline-offset:2px;}
+#ownerPortalView .hb-owner-navigation .admin-tab-btn.hb-owner-active {background:#216b46;color:white;font-weight:700;}
+#ownerPortalView .hb-owner-count {flex:0 0 auto;background:#ffffff24;color:#fff;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:700;}
+#ownerPortalView .hb-owner-sidebar-foot {font-size:11px;color:#9fb8ad;padding:14px 12px 4px;margin-top:auto;}
+#ownerPortalView .hb-owner-main {min-width:0;max-width:1450px;width:100%;margin:0 auto;padding:24px clamp(14px,2.6vw,38px);display:flex;flex-direction:column;gap:20px;}
+#ownerPortalView .hb-owner-main > .bg-slate-900 {box-shadow:none;border-radius:18px;padding:22px 24px;}
+#ownerPortalView .hb-owner-overview > .grid {margin-top:0;}
+#ownerPortalView .hb-owner-overview-actions {background:white;border:1px solid #e2e8f0;border-radius:16px;padding:22px;display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;}
+#ownerPortalView .hb-owner-overview-actions h2 {font-weight:700;font-size:16px;color:#1e293b;}
+#ownerPortalView .hb-owner-overview-actions p {font-size:12px;color:#64748b;margin-top:5px;}
+#ownerPortalView .hb-owner-shortcuts {display:flex;gap:9px;flex-wrap:wrap;}
+#ownerPortalView .hb-owner-shortcuts button {border:1px solid #d4dfd9;background:#f6faf8;padding:9px 12px;border-radius:10px;font-size:12px;font-weight:650;color:#166534;}
+#ownerPortalView .hb-owner-shortcuts button:hover {background:#dcfce7;}
+#ownerPortalView .hb-owner-workspace {min-width:0;}
+#ownerPortalView .hb-owner-workspace > [id^="tabContent"] {max-width:100%;}
+#ownerPortalView .hb-owner-workspace > [id^="tabContent"].hidden {display:none!important;}
+#ownerPortalView #tabContentAnalytics .analytics-view.hidden {display:none!important;}
+@media(max-width:900px){
+ #ownerPortalView .hb-owner-shell {grid-template-columns:minmax(0,1fr);}
+ #ownerPortalView .hb-owner-sidebar {padding:12px;position:static;gap:8px;}
+ #ownerPortalView .hb-owner-brand {padding:5px 7px 8px;}
+ #ownerPortalView .hb-owner-nav-heading,#ownerPortalView .hb-owner-sidebar-foot {display:none;}
+ #ownerPortalView .hb-owner-navigation {flex-direction:row;overflow-x:auto;scrollbar-width:thin;gap:5px;padding-bottom:3px;}
+ #ownerPortalView .hb-owner-navigation .admin-tab-btn {width:auto;min-width:max-content;}
+ #ownerPortalView .hb-owner-main {padding:16px;}
+}
+@media print {
+ #ownerPortalView .hb-owner-sidebar,#ownerPortalView .hb-owner-overview,#ownerPortalView .hb-owner-main > .bg-slate-900 {display:none!important;}
+ #ownerPortalView .hb-owner-shell {display:block!important;}
+ #ownerPortalView .hb-owner-main {padding:0!important;max-width:none!important;}
+ #ownerPortalView #hbOwnerWorkspaceContent {display:block!important;border:0!important;box-shadow:none!important;}
+}
+
+/* Owner Overview refresh — strictly scoped to landlord portal. */
+#ownerPortalView .hb-owner-main > .bg-slate-900 {display:none;}
+#ownerPortalView .hb-overview-section-head {display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;}
+#ownerPortalView .hb-overview-section-head h2 {font-size:21px;line-height:1.3;font-weight:800;color:#14263a;}
+#ownerPortalView .hb-overview-section-head p {font-size:12px;color:#64748b;margin-top:3px;}
+#ownerPortalView .hb-overview-month {font-size:11px;color:#64748b;white-space:nowrap;padding-top:5px;}
+#ownerPortalView .hb-overview-kpis {display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;}
+#ownerPortalView .hb-overview-kpi {min-width:0;min-height:104px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px 13px;display:flex;flex-direction:column;gap:7px;box-shadow:0 1px 3px #0f172a08;}
+#ownerPortalView .hb-overview-kpi > span {font-size:11px;color:#64748b;font-weight:650;}
+#ownerPortalView .hb-overview-kpi strong {font-size:clamp(16px,1.6vw,22px);font-weight:800;color:#166534;line-height:1.2;overflow-wrap:anywhere;font-variant-numeric:tabular-nums;}
+#ownerPortalView .hb-overview-kpi small {font-size:10px;color:#94a3b8;line-height:1.4;}
+#ownerPortalView .hb-overview-main-grid {display:grid;grid-template-columns:1.02fr 1fr;gap:14px;}
+#ownerPortalView .hb-overview-lower-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;}
+#ownerPortalView .hb-overview-panel {min-width:0;background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:19px;box-shadow:0 1px 3px #0f172a08;}
+#ownerPortalView .hb-overview-panel-head {display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:18px;}
+#ownerPortalView .hb-overview-panel-head h3 {font-size:13px;font-weight:800;color:#1e293b;}
+#ownerPortalView .hb-overview-panel-head button {font-size:10px;color:#15803d;font-weight:700;white-space:nowrap;}
+#ownerPortalView .hb-overview-panel-head button:hover {text-decoration:underline;}
+#ownerPortalView .hb-overview-occupancy-body {display:flex;align-items:center;gap:20px;min-height:175px;}
+#ownerPortalView .hb-overview-donut {--hb-occupancy:0%;flex:none;width:140px;height:140px;border-radius:50%;background:conic-gradient(#16a34a var(--hb-occupancy),#e2e8f0 0);display:grid;place-items:center;}
+#ownerPortalView .hb-overview-donut>div {width:105px;height:105px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;}
+#ownerPortalView .hb-overview-donut strong {font-size:25px;color:#14532d;font-weight:800;}
+#ownerPortalView .hb-overview-donut small {font-size:10px;color:#64748b;}
+#ownerPortalView .hb-overview-property-bars {flex:1;min-width:0;display:flex;flex-direction:column;gap:12px;max-height:220px;overflow:auto;}
+#ownerPortalView .hb-overview-property-row>div:first-child {display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;}
+#ownerPortalView .hb-overview-property-row span {font-size:11px;font-weight:650;color:#334155;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#ownerPortalView .hb-overview-property-row small {font-size:10px;color:#94a3b8;white-space:nowrap;}
+#ownerPortalView .hb-overview-track {height:7px;border-radius:999px;background:#e2e8f0;overflow:hidden;}
+#ownerPortalView .hb-overview-track span {display:block;height:100%;background:#16a34a;border-radius:999px;}
+#ownerPortalView .hb-overview-caption {font-size:11px;color:#64748b;}
+#ownerPortalView .hb-overview-finance-total {display:block;color:#0f172a;font-size:26px;font-weight:850;margin:7px 0 22px;}
+#ownerPortalView .hb-overview-progress {height:13px;background:#fbbf24;border-radius:999px;overflow:hidden;}
+#ownerPortalView .hb-overview-progress span {display:block;width:0;height:100%;background:#16a34a;border-radius:999px;}
+#ownerPortalView .hb-overview-finance-split {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:22px;}
+#ownerPortalView .hb-overview-finance-split div {display:flex;flex-direction:column;gap:5px;min-width:0;}
+#ownerPortalView .hb-overview-finance-split span {font-size:10px;color:#64748b;}
+#ownerPortalView .hb-overview-finance-split strong {font-size:17px;color:#166534;overflow-wrap:anywhere;}
+#ownerPortalView .hb-overview-finance-split div:last-child strong {color:#b45309;}
+#ownerPortalView .hb-overview-fineprint {font-size:10px;color:#94a3b8;margin-top:14px;}
+#ownerPortalView .hb-overview-lower-grid .hb-overview-panel {min-height:195px;}
+#ownerPortalView .hb-overview-lower-grid .hb-overview-panel-head {margin-bottom:8px;}
+#ownerPortalView .hb-overview-rows {display:flex;flex-direction:column;}
+#ownerPortalView .hb-overview-row {width:100%;display:flex;align-items:center;gap:8px;text-align:left;padding:11px 0;border-bottom:1px solid #f1f5f9;font-size:11px;color:#475569;}
+#ownerPortalView .hb-overview-row:last-child {border-bottom:none;}
+#ownerPortalView .hb-overview-row:hover {color:#166534;}
+#ownerPortalView .hb-overview-row i {color:#16a34a;width:15px;text-align:center;flex:none;}
+#ownerPortalView .hb-overview-row span {flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#ownerPortalView .hb-overview-row strong {font-size:12px;color:#0f172a;}
+#ownerPortalView .hb-overview-row small {color:#64748b;white-space:nowrap;font-size:10px;}
+#ownerPortalView .hb-overview-empty {font-size:12px;color:#94a3b8;padding:22px 0;line-height:1.5;}
+#ownerPortalView .hb-owner-overview-actions {padding:15px 20px;}
+#ownerPortalView .hb-owner-overview-actions h2 {font-size:13px;}
+#ownerPortalView .hb-owner-overview-actions p {font-size:11px;}
+@media (max-width:1250px) {#ownerPortalView .hb-overview-kpis {grid-template-columns:repeat(3,minmax(0,1fr));}}
+@media (max-width:780px) {#ownerPortalView .hb-overview-main-grid,#ownerPortalView .hb-overview-lower-grid {grid-template-columns:1fr;}#ownerPortalView .hb-overview-occupancy-body {gap:14px;}}
+@media (max-width:540px) {#ownerPortalView .hb-overview-kpis {grid-template-columns:repeat(2,minmax(0,1fr));}#ownerPortalView .hb-overview-kpi {padding:12px;min-height:95px;}#ownerPortalView .hb-overview-donut {width:112px;height:112px;}#ownerPortalView .hb-overview-donut>div {width:82px;height:82px;}#ownerPortalView .hb-overview-donut strong {font-size:20px;}#ownerPortalView .hb-overview-panel {padding:14px;}}
+
+/* Owner-only persistent navigation: content scrolls, sidebar stays in view. */
+@media screen and (min-width: 901px) {
+  #ownerPortalView .hb-owner-sidebar {
+    position: sticky;
+    top: 64px; /* Under the existing sticky site header. */
+    align-self: start;
+    height: calc(100dvh - 64px);
+    max-height: calc(100dvh - 64px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: #456757 transparent;
+  }
+}
+
+/* On narrower screens, retain horizontally scrollable navigation, pinned beneath header. */
+@media screen and (max-width: 900px) {
+  #ownerPortalView .hb-owner-sidebar {
+    position: sticky;
+    top: 64px;
+    z-index: 20;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+}
